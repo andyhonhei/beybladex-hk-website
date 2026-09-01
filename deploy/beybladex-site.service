@@ -1,0 +1,12 @@
+[Unit]
+Description=Beyblade X HK website
+After=network.target
+
+[Service]
+WorkingDirectory=/home/ubuntu/beybladex-hk-website
+ExecStart=/usr/bin/python3 /home/ubuntu/beybladex-hk-website/src/beyblade_site.py --config /home/ubuntu/hobbyland_checknew_product/config/watch_config.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
