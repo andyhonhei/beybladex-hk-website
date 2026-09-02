@@ -37,6 +37,10 @@ VARIANT_IMG_RE = re.compile(
     re.I,
 )
 LINE_RE = re.compile(r"^(BXA|BXG|BXH|CX|UX|BX)", re.I)
+INTERNAL_PHSTUDY_ID_RE = re.compile(r"^[A-Z]{2}-(?:PRD|EVE|CMD|FRB)-", re.I)
+HUB_LIMITED_SIBLING_RE = re.compile(
+    r"^(?:BX|UX|CX)-00-(bxg|bxh|bxc)(\d+)$", re.I
+)
 COMBO_RE = re.compile(
     r"([A-Z]{0,3})(\d{1,2}-\d{2,3})([A-Za-z]{1,3})(?:\s|（|\(|$)"
 )
@@ -60,6 +64,7 @@ PHSTUDY_IMG_FOLDER = {
     "metal_blade": "MetalBlade",
     "over_blade": "OverBlade",
     "assist_blade": "AssistBlade",
+    "main_blade": "MainBlade",
 }
 SERIES_PART_FIELDS = (
     ("blade_id", "blade"),
@@ -73,6 +78,16 @@ SERIES_PART_FIELDS = (
 )
 BLADE_SLOTS = frozenset(
     {"blade", "lock_chip", "metal_blade", "over_blade", "assist_blade"}
+)
+FAMILY_DISPLAY_SLOTS = BLADE_SLOTS | frozenset({"ratchet", "bit"})
+DISPLAY_SLOT_ORDER = (
+    "lock_chip",
+    "blade",
+    "metal_blade",
+    "over_blade",
+    "assist_blade",
+    "ratchet",
+    "bit",
 )
 STOCK_PARTS = {
     "CX-07": ["cx-chip-Pg", "cx-main-Bs", "cx-assist-A", "Tr"],
@@ -298,6 +313,17 @@ def parts_from_cx_prefix(prefix):
     return []
 
 
+def hub_cx_part_key(part_id):
+    part_id = str(part_id or "")
+    for prefix, slot in SLOT_FROM_PREFIX.items():
+        head = prefix + "-"
+        if part_id.startswith(head):
+            token = part_id[len(head) :]
+            if token:
+                return slot, token
+    return "", ""
+
+
 def _add_part_to_product(catalog, product_id, part_id, slot=None):
     if not product_id or not part_id:
         return
@@ -390,6 +416,202 @@ def fill_missing_parts(catalog):
     return catalog
 
 
+def product_family_ids(catalog, product):
+    product = product or {}
+    pid = str(product.get("id") or "")
+    base = str(product.get("base_set_id") or pid)
+    ids = set()
+    if pid:
+        ids.add(pid)
+    if base:
+        ids.add(base)
+    ids.update(str(vid) for vid in (product.get("variant_ids") or []) if vid)
+    for rec in (catalog.get("products") or {}).values():
+        rid = str(rec.get("id") or "")
+        rbase = str(rec.get("base_set_id") or "")
+        if rid == pid or rid == base or rbase == pid or (base and rbase == base):
+            if rid:
+                ids.add(rid)
+            if rbase:
+                ids.add(rbase)
+            ids.update(str(vid) for vid in (rec.get("variant_ids") or []) if vid)
+    return ids
+
+
+def own_releases_for_product_part(catalog, product, part_id):
+    part_id = str(part_id or "")
+    if not part_id:
+        return []
+    family = product_family_ids(catalog, product)
+    slot, token = hub_cx_part_key(part_id)
+    rows = []
+    for rec in (catalog.get("part_releases") or {}).values():
+        rel_id = str(rec.get("part_id") or "")
+        rel_slot = rec.get("slot") or guess_slot(rel_id)
+        set_id = str(rec.get("set_id") or "")
+        base = str(rec.get("base_set_id") or "")
+        if set_id not in family and base not in family:
+            continue
+        if rel_id == part_id:
+            rows.append(rec)
+            continue
+        if slot and token and rel_slot == slot and rel_id == token:
+            rows.append(rec)
+    rows.sort(key=lambda rec: str(rec.get("set_id") or rec.get("id") or ""))
+    return rows
+
+
+def _display_row_from_release(part_rec, rel, part_id):
+    rec = dict(part_rec)
+    rel_id = rel.get("id") or ""
+    rec["image_path"] = (
+        rel.get("image_path")
+        or rec.get("image_path")
+        or (phstudy_image_url(rel.get("slot") or rec.get("slot"), rel_id) if rel_id else "")
+    )
+    rec["set_id"] = rel.get("set_id") or ""
+    rec["release_id"] = rel.get("id") or ""
+    rec["first_seen_in"] = ""
+    rec["slot"] = rel.get("slot") or rec.get("slot")
+    rec["part_id"] = rec.get("id") or part_id
+    if rel.get("name_zh"):
+        rec["name_zh"] = rel.get("name_zh")
+    return rec
+
+
+def display_part_sort_key(row):
+    row = row or {}
+    slot = row.get("slot") or ""
+    try:
+        slot_i = DISPLAY_SLOT_ORDER.index(slot)
+    except ValueError:
+        slot_i = len(DISPLAY_SLOT_ORDER)
+    return (
+        str(row.get("set_id") or ""),
+        slot_i,
+        str(row.get("part_id") or row.get("id") or ""),
+    )
+
+
+def _foreign_first_seen(rec, part_id, family):
+    first = rec.get("first_seen_in") or ""
+    if not first or first in family:
+        return False
+    slot = rec.get("slot") or guess_slot(part_id)
+    return slot != "blade"
+
+
+def hub_limited_sibling_id(product_id):
+    match = HUB_LIMITED_SIBLING_RE.match(str(product_id or ""))
+    if not match:
+        return ""
+    return "%s-%s" % (match.group(1).upper(), str(int(match.group(2))))
+
+
+def _row_is_blade(row):
+    slot = row.get("slot") or guess_slot(row.get("part_id") or row.get("id") or "")
+    return slot == "blade"
+
+
+def _add_missing_blades(catalog, product, parts, shown, rows):
+    if any(_row_is_blade(row) for row in rows):
+        return
+    candidates = []
+    sibling = (catalog.get("products") or {}).get(
+        hub_limited_sibling_id(product.get("id"))
+    ) or {}
+    candidates.extend(sibling.get("part_ids") or [])
+    combo = parse_combo_from_name(product.get("name_zh") or "")
+    if combo and combo.get("label"):
+        candidates.extend(
+            _blade_part_ids_for_label(catalog, combo["label"], product.get("id"))
+        )
+    for part_id in candidates:
+        part_id = str(part_id or "")
+        if not part_id or part_id in shown:
+            continue
+        rec = dict(parts.get(part_id) or {"id": part_id})
+        slot = rec.get("slot") or guess_slot(part_id)
+        if slot != "blade" or not is_product_display_part(rec):
+            continue
+        own = own_releases_for_product_part(catalog, product, part_id)
+        if own:
+            rec = _display_row_from_release(rec, own[0], part_id)
+        else:
+            rec["part_id"] = rec.get("id") or part_id
+        rows.append(rec)
+        shown.add(part_id)
+
+
+def display_parts_for_product(catalog, product):
+    catalog = catalog or {}
+    product = product or {}
+    family = product_family_ids(catalog, product)
+    parts = catalog.get("parts") or {}
+    rows = []
+    for part_id in product.get("part_ids") or []:
+        rec = dict(parts.get(part_id) or {"id": part_id})
+        if not is_product_display_part(rec):
+            continue
+        own = own_releases_for_product_part(catalog, product, part_id)
+        if own:
+            rec = _display_row_from_release(rec, own[0], part_id)
+        elif rec.get("release_ids"):
+            if _foreign_first_seen(rec, part_id, family):
+                continue
+            first = rec.get("first_seen_in") or ""
+            rec["set_id"] = first if first in family else ""
+            rec["first_seen_in"] = rec["set_id"]
+            rec["part_id"] = rec.get("id") or part_id
+        else:
+            if hub_cx_part_key(part_id)[0] and _foreign_first_seen(rec, part_id, family):
+                continue
+            first = rec.get("first_seen_in") or ""
+            rec["set_id"] = first if first in family else ""
+            rec["first_seen_in"] = rec["set_id"]
+            rec["part_id"] = rec.get("id") or part_id
+        rows.append(rec)
+    shown = set()
+    for row in rows:
+        pid = str(row.get("part_id") or row.get("id") or "")
+        if pid:
+            shown.add(pid)
+        _, token = hub_cx_part_key(pid)
+        if token:
+            shown.add(token)
+    extra = []
+    for rel in (catalog.get("part_releases") or {}).values():
+        slot = rel.get("slot") or guess_slot(rel.get("part_id") or "")
+        if slot not in FAMILY_DISPLAY_SLOTS:
+            continue
+        set_id = str(rel.get("set_id") or "")
+        base = str(rel.get("base_set_id") or "")
+        if set_id not in family and base not in family:
+            continue
+        part_id = str(rel.get("part_id") or "")
+        if not part_id or part_id in shown:
+            continue
+        rec = dict(parts.get(part_id) or {"id": part_id, "slot": slot})
+        if not is_product_display_part(rec):
+            continue
+        extra.append(_display_row_from_release(rec, rel, part_id))
+        shown.add(part_id)
+    extra.sort(key=display_part_sort_key)
+    rows.extend(extra)
+    _add_missing_blades(catalog, product, parts, shown, rows)
+    if any(
+        (
+            (row.get("slot") in BLADE_SLOTS)
+            or (guess_slot(row.get("part_id") or "") in BLADE_SLOTS)
+        )
+        and (row.get("name_zh") or row.get("name_en"))
+        for row in rows
+    ):
+        rows = [row for row in rows if not _unnamed_blade_row(row)]
+    rows.sort(key=display_part_sort_key)
+    return rows
+
+
 def catalog_ids_for_model(model, products):
     model = str(model or "").strip().upper()
     if not model:
@@ -473,7 +695,9 @@ def load_shop_listing_rows(data_dir=None):
     return rows
 
 
-SET_HINT_RE = re.compile(r"組|套組|對戰|入門|隨機|選集|紀念|multipack|\bset\b", re.I)
+SET_HINT_RE = re.compile(
+    r"組|套組|對戰|入門|隨機|選集|紀念|multipack|dual pack|\bset\b", re.I
+)
 JUNK_PART_RE = re.compile(
     r"^(BT|BL|MB|OV|LC|AS|RC|HB|SR|RT)-|RATCHET-integrated|^■$",
     re.I,
@@ -493,9 +717,46 @@ def is_set_product(rec):
 
 def is_display_part(rec):
     pid = str((rec or {}).get("id") or "")
-    if not pid or JUNK_PART_RE.search(pid) or ENGLISH_PART_RE.match(pid):
+    if not pid or JUNK_PART_RE.search(pid):
         return False
+    if ENGLISH_PART_RE.match(pid):
+        return bool((rec or {}).get("name_zh") or (rec or {}).get("name_en"))
     return True
+
+
+def is_product_display_part(rec):
+    rec = rec or {}
+    if is_display_part(rec):
+        return True
+    pid = str(rec.get("id") or "")
+    if not pid or not JUNK_PART_RE.search(pid):
+        return False
+    slot = rec.get("slot") or guess_slot(pid)
+    if slot != "blade":
+        return False
+    return bool(rec.get("name_zh") or rec.get("name_en"))
+
+
+def _unnamed_blade_row(rec, part_id=""):
+    rec = rec or {}
+    pid = str(rec.get("part_id") or rec.get("id") or part_id or "")
+    slot = rec.get("slot") or guess_slot(pid)
+    if slot not in BLADE_SLOTS:
+        return False
+    return not (rec.get("name_zh") or rec.get("name_en"))
+
+
+def is_internal_phstudy_id(product_id):
+    return bool(INTERNAL_PHSTUDY_ID_RE.match(str(product_id or "").strip()))
+
+
+def drop_internal_phstudy_products(catalog):
+    catalog = catalog or {}
+    products = catalog.get("products") or {}
+    for pid in list(products):
+        if is_internal_phstudy_id(pid):
+            products.pop(pid, None)
+    return catalog
 
 
 def _combo_url_without_variant(url):
@@ -510,13 +771,47 @@ def hub_combo_image_url(product_id):
     return "%s/combos/%s.webp" % (HUB_IMG, urllib.parse.quote(slug, safe="._"))
 
 
+def phstudy_retail_product_key(product_id):
+    text = str(product_id or "").strip().upper()
+    if not text:
+        return ""
+    match = re.match(r"^([A-Z]+)[-_]?(\d+)", text)
+    if not match:
+        return re.sub(r"[^A-Z0-9]", "", text)
+    return match.group(1) + match.group(2)
+
+
+def merge_phstudy_products_multilang(catalog, items):
+    catalog = catalog or {}
+    products = catalog.setdefault("products", {})
+    by_id = {}
+    for item in items or []:
+        pid = str((item or {}).get("product_id") or "").strip()
+        if pid:
+            by_id[pid] = item
+    for rec in products.values():
+        key = phstudy_retail_product_key(rec.get("base_set_id") or rec.get("id"))
+        item = by_id.get(key)
+        if not item:
+            continue
+        images = item.get("images") or []
+        if not images:
+            continue
+        rel = str(images[0] or "").lstrip("/")
+        if rel:
+            rec["box_image"] = "%s/%s" % (PHSTUDY_ORIGIN, rel)
+    return catalog
+
+
 def _product_image_urls(rec):
     rec = rec or {}
     image = rec.get("image") or ""
     hub = hub_combo_image_url(rec.get("id"))
-    blade_id = (rec.get("phstudy_ids") or {}).get("blade")
     urls = []
     if is_set_product(rec):
+        if rec.get("box_image"):
+            urls.append(rec.get("box_image"))
+        urls.append(phstudy_product_image_url(rec))
         if _combo_url_without_variant(image):
             urls.append(image)
         if hub:
@@ -524,10 +819,9 @@ def _product_image_urls(rec):
         if image:
             urls.append(image)
     else:
+        urls.append(phstudy_product_image_url(rec))
         if image:
             urls.append(image)
-        if blade_id:
-            urls.append(phstudy_image_url("blade", blade_id))
         if hub:
             urls.append(hub)
     out = []
@@ -559,8 +853,28 @@ def part_image_url(part):
 
 
 def phstudy_image_url(slot, item_id):
-    folder = PHSTUDY_IMG_FOLDER.get(slot or "") or "Blade"
+    item_id = str(item_id or "")
+    if "MAINBLADE" in item_id.upper():
+        folder = "MainBlade"
+    else:
+        folder = PHSTUDY_IMG_FOLDER.get(slot or "") or "Blade"
     return "%s/images/site/%s/%s.png" % (PHSTUDY_ORIGIN, folder, item_id)
+
+
+def phstudy_product_image_url(product):
+    ids = (product or {}).get("phstudy_ids") or {}
+    for slot in (
+        "blade",
+        "metal_blade",
+        "over_blade",
+        "main_blade",
+        "lock_chip",
+        "assist_blade",
+    ):
+        item_id = ids.get(slot)
+        if item_id:
+            return phstudy_image_url(slot, item_id)
+    return ""
 
 
 def _lang_text(value, lang="zh-TW"):
@@ -699,7 +1013,7 @@ def merge_phstudy_data(catalog, payload, source="takara"):
                 continue
             parsed = parse_phstudy_series(rec, source=source)
             product_id = parsed["id"]
-            if not product_id:
+            if not product_id or is_internal_phstudy_id(product_id):
                 continue
             part_ids = []
             for slot, phstudy_id in (parsed.get("phstudy_ids") or {}).items():
@@ -743,6 +1057,15 @@ def fetch_phstudy_payloads(get_text):
     print("Phstudy fetch hasbro_products.json")
     payloads.append(
         ("hasbro", {"hasbro_products": json.loads(get_text(products_url))})
+    )
+    print("Phstudy fetch products_multilang.json")
+    payloads.append(
+        (
+            "products_multilang",
+            json.loads(
+                get_text("%s/data/products_multilang.json" % PHSTUDY_ORIGIN)
+            ),
+        )
     )
     return payloads
 
@@ -798,22 +1121,24 @@ def download_catalog_images(catalog, get_bytes, dest_dir=None, overwrite=False):
     for rec in products.values():
         urls = _product_image_urls(rec)
         if urls:
-            jobs.append(("products", rec["id"], urls, rec))
+            jobs.append(("products", rec["id"], urls, rec, "image_path"))
+        if rec.get("box_image"):
+            jobs.append(("boxes", rec["id"], [rec["box_image"]], rec, "box_image_path"))
     for rec in variants.values():
         if rec.get("image"):
-            jobs.append(("variants", rec["id"], [rec["image"]], rec))
+            jobs.append(("variants", rec["id"], [rec["image"]], rec, "image_path"))
     for rec in parts.values():
         url = part_image_url(rec)
         if url:
-            jobs.append(("parts", rec["id"], [url], rec))
+            jobs.append(("parts", rec["id"], [url], rec, "image_path"))
     for rec in (catalog.get("part_releases") or {}).values():
         url = rec.get("image") or phstudy_image_url(rec.get("slot"), rec.get("id"))
         if url and rec.get("id"):
-            jobs.append(("releases", rec["id"], [url], rec))
+            jobs.append(("releases", rec["id"], [url], rec, "image_path"))
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def run_job(job):
-        kind, item_id, urls, rec = job
+        kind, item_id, urls, rec, path_key = job
         rel = catalog_image_rel(kind, item_id)
         dest = os.path.join(dest_dir, rel)
         ok = False
@@ -822,7 +1147,7 @@ def download_catalog_images(catalog, get_bytes, dest_dir=None, overwrite=False):
             if _store_image(dest, url, get_bytes, overwrite=force):
                 ok = True
                 break
-        return rec, rel, ok
+        return rec, rel, ok, path_key
 
     workers = 8 if len(jobs) > 20 else 1
     if workers == 1:
@@ -833,9 +1158,9 @@ def download_catalog_images(catalog, get_bytes, dest_dir=None, overwrite=False):
             futs = [pool.submit(run_job, job) for job in jobs]
             for fut in as_completed(futs):
                 results.append(fut.result())
-    for rec, rel, ok in results:
+    for rec, rel, ok, path_key in results:
         if ok:
-            rec["image_path"] = rel
+            rec[path_key] = rel
             saved += 1
     print("Part images saved: %d / %d" % (saved, len(jobs)))
     return saved
@@ -947,6 +1272,7 @@ def write_catalog(catalog, dest_dir=None):
         "shop_listings": os.path.join(dest_dir, "shop_listings.json"),
         "part_releases": os.path.join(dest_dir, "part_releases.json"),
     }
+    drop_internal_phstudy_products(catalog)
     _dump(paths["products"], catalog.get("products") or {})
     _dump(paths["variants"], catalog.get("variants") or {})
     _dump(paths["parts"], catalog.get("parts") or {})
@@ -954,6 +1280,9 @@ def write_catalog(catalog, dest_dir=None):
     _dump(paths["meta"], catalog.get("meta") or {})
     _dump(paths["shop_listings"], catalog.get("shop_listings") or [])
     _dump(paths["part_releases"], catalog.get("part_releases") or {})
+    if catalog.get("products_multilang") is not None:
+        paths["products_multilang"] = os.path.join(dest_dir, "products_multilang.json")
+        _dump(paths["products_multilang"], catalog.get("products_multilang") or [])
     return paths
 
 
@@ -968,6 +1297,10 @@ def load_catalog(dest_dir=None):
         "shop_listings": _load(os.path.join(dest_dir, "shop_listings.json"), []),
         "part_releases": _load(os.path.join(dest_dir, "part_releases.json"), {}),
     }
+    items = _load(os.path.join(dest_dir, "products_multilang.json"), [])
+    if items:
+        merge_phstudy_products_multilang(catalog, items)
+    drop_internal_phstudy_products(catalog)
     return catalog
 
 
@@ -1008,6 +1341,10 @@ def refresh_parts_catalog(
     fill_missing_parts(catalog)
     try:
         for source, payload in fetch_phstudy_payloads(get_text):
+            if source == "products_multilang":
+                catalog["products_multilang"] = payload
+                merge_phstudy_products_multilang(catalog, payload)
+                continue
             merge_phstudy_data(catalog, payload, source=source)
         catalog.setdefault("meta", {}).setdefault("sources", [])
         if PHSTUDY_ORIGIN not in catalog["meta"]["sources"]:

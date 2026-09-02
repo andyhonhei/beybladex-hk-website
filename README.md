@@ -24,7 +24,15 @@ On EC2, the website may keep using the existing watch config at
 `/home/ubuntu/hobbyland_checknew_product/config/watch_config.json` so MySQL and
 admin credentials are not duplicated.
 
-Run locally with:
+This checkout is meant to sit at `website/` next to the watch repo. `data` should be a symlink to the watch `data/` folder so SKUs and photos match.
+
+From the **watch** repo root:
+
+```bash
+python3 website/src/beyblade_site.py --config config/watch_config.json
+```
+
+Or from this folder, using only the example (empty MySQL/admin):
 
 ```bash
 python3 src/beyblade_site.py --config config/site_config.example.json

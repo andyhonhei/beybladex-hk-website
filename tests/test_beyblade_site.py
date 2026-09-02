@@ -463,6 +463,7 @@ class StatusPageTests(unittest.TestCase):
     def test_nav_includes_history_button(self):
         nav = site_nav_html()
         self.assertIn('<a class="nav-btn" href="/history">最新通知</a>', nav)
+        self.assertIn('<a class="nav-btn" href="/browser">瀏覽器</a>', nav)
         self.assertNotIn(">通知歷史</a>", nav)
         self.assertNotIn('href="/catalog"', nav)
         self.assertNotIn('href="/collection"', nav)
@@ -1842,6 +1843,7 @@ class SiteStatusAuthTests(unittest.TestCase):
         self.assertIn("https://beybladex-watch.andyhhh.com/shop/all", xml)
         self.assertIn("https://beybladex-watch.andyhhh.com/shops", xml)
         self.assertIn("https://beybladex-watch.andyhhh.com/catalog", xml)
+        self.assertIn("https://beybladex-watch.andyhhh.com/browser", xml)
         self.assertIn("https://beybladex-watch.andyhhh.com/parts", xml)
         self.assertIn("https://beybladex-watch.andyhhh.com/collection", xml)
         self.assertIn("https://beybladex-watch.andyhhh.com/subscribe", xml)

@@ -294,7 +294,7 @@ def start_status_server():
             from catalog_pages import handle_catalog_http
 
             catalog_hit = (
-                parsed.path in ("/catalog", "/parts", "/collection")
+                parsed.path in ("/catalog", "/parts", "/collection", "/browser", "/browser/")
                 or parsed.path.startswith("/catalog/")
                 or parsed.path.startswith("/parts/")
                 or parsed.path.startswith("/parts-images/")
@@ -569,6 +569,7 @@ def serve_forever(config_path=None):
         print("status server did not start", file=sys.stderr)
         return 1
     print("Catalog: http://%s:%s/catalog" % (st["host"], st["port"]), flush=True)
+    print("Browser: http://%s:%s/browser" % (st["host"], st["port"]), flush=True)
     try:
         while True:
             time.sleep(3600)

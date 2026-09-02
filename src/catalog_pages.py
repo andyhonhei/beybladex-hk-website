@@ -11,12 +11,16 @@ from parts_catalog import (
     HUB_ORIGIN,
     PARTS_DIR,
     attach_shop_listings,
+    display_parts_for_product,
+    guess_slot,
     is_display_part,
+    is_internal_phstudy_id,
     is_set_product,
     load_catalog,
     load_shop_listing_rows,
     parse_combo_from_name,
     parts_from_cx_prefix,
+    phstudy_product_image_url,
 )
 
 COLLECTION_KEY = "beyblade-collection-v1"
@@ -116,13 +120,147 @@ COLLECTION_JS = r"""
 </script>
 """ % json.dumps(COLLECTION_KEY)
 
+BROWSER_JS = r"""
+<script>
+(function(){
+  var dataEl=document.getElementById("browser-data");
+  var grid=document.getElementById("browser-grid");
+  var table=document.getElementById("browser-table");
+  var countEl=document.getElementById("browser-count");
+  var qEl=document.getElementById("browser-q");
+  var sortEl=document.getElementById("browser-sort");
+  if(!dataEl||!grid||!table) return;
+  var items=[];
+  try{items=JSON.parse(dataEl.textContent||"[]");}catch(e){items=[];}
+  var state={line:"",tag:"",kind:"series",brand:"",q:"",sort:"default",view:"grid"};
+  function params(){
+    var u=new URLSearchParams(window.location.search);
+    ["line","tag","kind","brand","q","sort","view"].forEach(function(k){
+      if(u.has(k)) state[k]=u.get(k)||"";
+    });
+    if(!state.kind) state.kind="series";
+    if(state.view!=="table") state.view="grid";
+  }
+  function writeParams(){
+    var u=new URLSearchParams();
+    Object.keys(state).forEach(function(k){
+      if(state[k] && !(k==="kind" && state[k]==="series") && !(k==="view" && state[k]==="grid") && !(k==="sort" && state[k]==="default"))
+        u.set(k,state[k]);
+    });
+    var qs=u.toString();
+    history.replaceState(null,"",window.location.pathname+(qs?"?"+qs:""));
+  }
+  function match(item){
+    if(state.brand && item.brand!==state.brand) return false;
+    if(state.tag && (item.tags||[]).indexOf(state.tag)<0) return false;
+    if(state.line){
+      if(item.kind==="product"){
+        if(item.line!==state.line) return false;
+      }else if((item.lines||[]).indexOf(state.line)<0) return false;
+    }
+    if(state.kind==="series" && item.kind!=="product") return false;
+    if(state.kind==="set" && !item.set) return false;
+    if(state.kind && state.kind!=="series" && state.kind!=="set" && item.slot!==state.kind) return false;
+    if(state.q){
+      var blob=((item.name||"")+" "+(item.sku||"")+" "+(item.id||"")).toLowerCase();
+      if(blob.indexOf(state.q)<0) return false;
+    }
+    return true;
+  }
+  function cmp(a,b){
+    var av,bv;
+    if(state.sort==="name"){av=a.name||"";bv=b.name||"";}
+    else if(state.sort==="released_on"){av=a.released_on||"";bv=b.released_on||"";}
+    else if(state.sort==="price"){av=Number(a.price_jpy)||0;bv=Number(b.price_jpy)||0;return av-bv;}
+    else {av=(a.line||"")+" "+(a.id||"");bv=(b.line||"")+" "+(b.id||"");}
+    return av<bv?-1:av>bv?1:0;
+  }
+  function thumb(item){
+    if(item.image) return "<img class='thumb' src='"+item.image.replace(/"/g,"&quot;")+"' alt='' loading='lazy'>";
+    return "<div class='thumb thumb-empty' aria-hidden='true'></div>";
+  }
+  function render(){
+    var rows=items.filter(match).sort(cmp);
+    if(countEl) countEl.textContent=rows.length+" 項";
+    document.querySelectorAll("#browser-app [data-group]").forEach(function(btn){
+      var g=btn.getAttribute("data-group");
+      var v=btn.getAttribute("data-value")||"";
+      btn.classList.toggle("on", state[g]===v);
+    });
+    document.querySelectorAll("#browser-view [data-view]").forEach(function(btn){
+      btn.classList.toggle("on", state.view===btn.getAttribute("data-view"));
+    });
+    if(qEl && qEl.value!==state.q) qEl.value=state.q;
+    if(sortEl) sortEl.value=state.sort||"default";
+    if(state.view==="table"){
+      grid.hidden=true;
+      table.hidden=false;
+      var body=rows.map(function(item){
+        return "<tr><td>"+thumb(item)+"</td><td><a href='"+item.href+"'>"+
+          (item.name||item.id)+"</a></td><td>"+(item.sku||"")+"</td><td>"+
+          (item.line||item.slot||"")+"</td><td>"+(item.released_on||"")+"</td><td>"+
+          (item.price_jpy!=="" && item.price_jpy!=null ? "¥"+item.price_jpy : "")+
+          "</td></tr>";
+      }).join("");
+      table.querySelector("tbody").innerHTML=body || "<tr><td colspan='6'>沒有符合的項目</td></tr>";
+    }else{
+      table.hidden=true;
+      grid.hidden=false;
+      grid.innerHTML=rows.map(function(item){
+        return "<a class='catalog-tile' href='"+item.href+"'>"+thumb(item)+
+          "<span class='name'>"+(item.name||item.id)+"</span><span class='sku'>"+
+          (item.sku||"")+"</span></a>";
+      }).join("") || "<p class='browser-empty'>沒有符合的項目</p>";
+    }
+  }
+  document.getElementById("browser-app").addEventListener("click", function(ev){
+    var btn=ev.target.closest("[data-group]");
+    if(!btn) return;
+    ev.preventDefault();
+    var g=btn.getAttribute("data-group");
+    var v=btn.getAttribute("data-value")||"";
+    if(g==="tag"){state.tag=v; if(v) state.line="";}
+    else if(g==="line"){state.line=v; if(v) state.tag="";}
+    else state[g]=v;
+    writeParams();
+    render();
+  });
+  var viewBox=document.getElementById("browser-view");
+  if(viewBox) viewBox.addEventListener("click", function(ev){
+    var btn=ev.target.closest("[data-view]");
+    if(!btn) return;
+    state.view=btn.getAttribute("data-view")||"grid";
+    writeParams();
+    render();
+  });
+  if(qEl){
+    var t=null;
+    qEl.addEventListener("input", function(){
+      clearTimeout(t);
+      t=setTimeout(function(){state.q=(qEl.value||"").trim().toLowerCase();writeParams();render();},120);
+    });
+  }
+  if(sortEl) sortEl.addEventListener("change", function(){
+    state.sort=sortEl.value||"default";
+    writeParams();
+    render();
+  });
+  params();
+  render();
+})();
+</script>
+"""
+
 
 def empty_collection():
     return {"products": [], "parts": [], "variants": [], "releases": []}
 
 
 def catalog_image_href(rel):
-    rel = str(rel or "").replace("\\", "/").lstrip("/")
+    rel = str(rel or "").replace("\\", "/").strip()
+    if rel.startswith("http://") or rel.startswith("https://"):
+        return rel
+    rel = rel.lstrip("/")
     if rel.startswith("images/"):
         rel = rel[len("images/") :]
     if not rel:
@@ -147,6 +285,9 @@ CATALOG_GRID_CSS = """
 .catalog-toolbar{position:sticky;top:0;z-index:6;background:var(--blue);padding:4px 0 10px}
 .catalog-toolbar .filter-store{max-width:100%;margin:0 0 10px;padding:12px 12px 12px}
 .catalog-toolbar .filter-combo{max-width:100%;margin:0}
+.catalog-toolbar > .filters{margin:0 0 10px}
+.catalog-toolbar > .filters a{border:1px solid #fff;color:#fff}
+.catalog-toolbar > .filters a.on{background:#fff;color:var(--ink)}
 .catalog-toolbar .search-row{margin:0;gap:8px;flex-wrap:nowrap;align-items:center}
 .catalog-toolbar .search-row input{min-width:0;flex:1;font-size:16px;padding:8px 12px;
 border:1px solid var(--ink);background:#fff;color:var(--ink)}
@@ -195,6 +336,31 @@ text-transform:uppercase;color:#666;padding-top:2px}
 .related-list .product-card .thumb,.related-list .product-card .thumb-empty{width:64px;height:64px;flex:0 0 64px;object-fit:contain}
 .related-desc{font-size:12px;margin:6px 0 0;color:#444}
 .stock-out{color:#888}
+.package-beys{margin:0 0 16px}
+.package-bey{display:flex;flex-direction:column;gap:6px;min-width:0;
+background:#fff;border:1px solid #ececf4;padding:6px 6px 8px}
+.package-bey .thumb,.package-bey .thumb-empty{width:100%;height:auto;aspect-ratio:1;
+flex:none;object-fit:contain;background:#fff}
+.package-bey .name{font-size:12px;line-height:1.3;margin:0}
+.package-bey .sku{font-family:"IBM Plex Mono",monospace;font-size:10px;color:#666;
+letter-spacing:.04em;margin:0}
+.package-bey .own-btn{margin-top:4px}
+.browser-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.browser-controls select,.browser-controls input[type=search]{min-height:36px;padding:6px 10px;
+border:1px solid var(--ink);background:#fff;color:var(--ink);font-size:14px}
+.browser-controls input[type=search]{flex:1;min-width:160px}
+.browser-view{display:flex;gap:0}
+.browser-view button{background:#fff;color:var(--ink);border:1px solid var(--ink);padding:8px 12px;
+font-family:"IBM Plex Mono",monospace;font-size:11px;cursor:pointer}
+.browser-view button.on{background:var(--ink);color:#fff}
+.browser-table{width:100%;border-collapse:collapse;background:#fff;font-size:13px}
+.browser-table th,.browser-table td{border-bottom:1px solid #ececf4;padding:8px;text-align:left;vertical-align:middle}
+.browser-table .thumb,.browser-table .thumb-empty{width:48px;height:48px;aspect-ratio:1;object-fit:contain}
+.browser-empty{margin:12px;color:#444}
+.catalog-grid[hidden],.browser-table[hidden]{display:none!important}
+.catalog-toolbar button.filter{background:transparent;color:#fff;border:1px solid #fff;padding:6px 12px;
+font:inherit;cursor:pointer}
+.catalog-toolbar button.filter.on{background:#fff;color:var(--ink)}
 """
 
 
@@ -211,6 +377,83 @@ def needs_variant_pick(product, variants):
     for vid in ids:
         keys.add(variant_combo_key((variants or {}).get(vid) or {"id": vid}))
     return len(keys) > 1
+
+
+def package_box_image_path(product, catalog=None):
+    product = product or {}
+    phstudy = phstudy_product_image_url(product)
+    if is_set_product(product):
+        path = str(
+            product.get("box_image_path")
+            or product.get("box_image")
+            or phstudy
+            or product.get("image_path")
+            or ""
+        )
+    else:
+        path = str(
+            phstudy
+            or product.get("image_path")
+            or product.get("box_image_path")
+            or product.get("box_image")
+            or ""
+        )
+    if path or not catalog:
+        return path
+    for bey in package_bey_entries(catalog, product):
+        child_path = bey.get("image_path") or ""
+        if child_path:
+            return child_path
+    return ""
+
+
+def package_bey_entries(catalog, product):
+    product = product or {}
+    catalog = catalog or {}
+    variants = catalog.get("variants") or {}
+    products = catalog.get("products") or {}
+    pid = str(product.get("id") or "")
+    rows = []
+    seen = set()
+    if pid:
+        for rec in products.values():
+            rid = str(rec.get("id") or "")
+            if not rid or rid == pid or rid in seen:
+                continue
+            if str(rec.get("base_set_id") or "") != pid:
+                continue
+            rows.append(
+                {
+                    "id": rid,
+                    "name": rec.get("name_zh") or rid,
+                    "image_path": package_box_image_path(rec) or rec.get("image_path") or "",
+                }
+            )
+            seen.add(rid)
+        if rows:
+            rows.sort(key=lambda row: row.get("id") or "")
+            return rows
+    for vid in product.get("variant_ids") or []:
+        vid = str(vid or "")
+        if not vid or vid in seen:
+            continue
+        variant = variants.get(vid) or {}
+        child = products.get(vid) or {}
+        rows.append(
+            {
+                "id": vid,
+                "name": child.get("name_zh")
+                or variant.get("name_zh")
+                or vid,
+                "image_path": package_box_image_path(child)
+                or variant.get("image_path")
+                or child.get("image_path")
+                or "",
+            }
+        )
+        seen.add(vid)
+    rows.sort(key=lambda row: row.get("id") or "")
+    return rows
 
 
 def parts_for_variant(variant, catalog):
@@ -259,14 +502,33 @@ def add_package_to_collection(owned, product_id, catalog, variant_id=None):
     return owned
 
 
-def filter_catalog_products(products, line="", tag="", q="", kind=""):
+def is_hasbro_product(product):
+    product = product or {}
+    if str(product.get("source") or "").lower() == "hasbro":
+        return True
+    if str(product.get("line") or "").upper() == "HASBRO":
+        return True
+    return "hasbro" in [str(t).lower() for t in (product.get("tags") or [])]
+
+
+def filter_catalog_products(products, line="", tag="", q="", kind="", brand=""):
     line = (line or "").upper()
     tag = (tag or "").lower()
     q = (q or "").strip().lower()
+    brand = (brand or "").strip().lower()
+    if not brand and line == "HASBRO":
+        brand = "hasbro"
     rows = []
     for rec in (products or {}).values():
+        if is_internal_phstudy_id(rec.get("id") or ""):
+            continue
         rec_line = str(rec.get("line") or "").upper()
-        if line == "HASBRO" and rec.get("source") != "hasbro" and rec_line != "HASBRO":
+        hasbro = is_hasbro_product(rec)
+        if brand == "hasbro" and not hasbro:
+            continue
+        if brand == "tt" and hasbro:
+            continue
+        if line == "HASBRO" and not hasbro:
             continue
         if line and line != "HASBRO" and rec_line != line:
             continue
@@ -295,7 +557,79 @@ def filter_catalog_products(products, line="", tag="", q="", kind=""):
     return rows
 
 
-def _page(title, path, inner, extra_style="", indexable=False):
+def browser_items(catalog):
+    catalog = catalog or {}
+    products = catalog.get("products") or {}
+    items = []
+    line_by_pid = {}
+    for rec in products.values():
+        pid = rec.get("id") or ""
+        if is_internal_phstudy_id(pid):
+            continue
+        line = str(rec.get("line") or "").upper()
+        line_by_pid[pid] = line
+        name = rec.get("name_zh") or rec.get("name_en") or pid
+        tags = [str(t).lower() for t in (rec.get("tags") or [])]
+        price = rec.get("price_jpy")
+        items.append(
+            {
+                "id": pid,
+                "kind": "product",
+                "href": "/catalog/" + urllib.parse.quote(str(pid), safe="-"),
+                "name": name,
+                "sku": pid,
+                "line": line,
+                "lines": [line] if line else [],
+                "slot": "",
+                "tags": tags,
+                "brand": "hasbro" if is_hasbro_product(rec) else "tt",
+                "released_on": rec.get("released_on") or "",
+                "price_jpy": price if price not in (None, "") else "",
+                "image": catalog_image_href(
+                    package_box_image_path(rec, catalog) or rec.get("image_path") or ""
+                ),
+                "set": is_set_product(rec),
+            }
+        )
+    for rec in (catalog.get("parts") or {}).values():
+        if not is_display_part(rec):
+            continue
+        part_id = rec.get("id") or ""
+        if not part_id:
+            continue
+        name = rec.get("name_zh") or rec.get("name_en") or part_id
+        lines = []
+        for uid in rec.get("used_in") or []:
+            line = line_by_pid.get(uid)
+            if line and line not in lines:
+                lines.append(line)
+        tags = [str(t).lower() for t in (rec.get("tags") or [])]
+        hasbro = str(rec.get("source") or "").lower() == "hasbro" or "hasbro" in tags
+        items.append(
+            {
+                "id": part_id,
+                "kind": "part",
+                "href": "/parts/" + urllib.parse.quote(str(part_id), safe="-._"),
+                "name": name,
+                "sku": part_id,
+                "line": lines[0] if len(lines) == 1 else "",
+                "lines": lines,
+                "slot": rec.get("slot") or "",
+                "tags": tags,
+                "brand": "hasbro" if hasbro else "tt",
+                "released_on": rec.get("released_on") or "",
+                "price_jpy": "",
+                "image": catalog_image_href(
+                    rec.get("image_path") or rec.get("image") or ""
+                ),
+                "set": False,
+            }
+        )
+    items.sort(key=lambda row: (row.get("kind") or "", row.get("line") or "", row.get("id") or ""))
+    return items
+
+
+def _page(title, path, inner, extra_style="", indexable=False, extra_script=""):
     from site_pages import page_seo_head, page_theme_css, site_nav_html, subscribe_script, filter_combo_script
 
     desc = "Beyblade X 圖鑑與本機零件庫"
@@ -334,7 +668,11 @@ font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.12em;text-t
         site_nav_html(),
         html.escape(title),
         inner,
-        subscribe_script() + filter_combo_script() + COLLECTION_JS + CATALOG_SHOPS_JS,
+        subscribe_script()
+        + filter_combo_script()
+        + COLLECTION_JS
+        + CATALOG_SHOPS_JS
+        + extra_script,
     )
 
 
@@ -349,10 +687,12 @@ SLOT_LABELS = {
 }
 
 
-def _catalog_href(line="", tag="", q="", kind=""):
+def _catalog_href(line="", tag="", q="", kind="", brand=""):
     bits = []
     if kind:
         bits.append("kind=" + urllib.parse.quote(str(kind)))
+    if brand:
+        bits.append("brand=" + urllib.parse.quote(str(brand)))
     if line:
         bits.append("line=" + urllib.parse.quote(str(line)))
     if tag:
@@ -362,12 +702,26 @@ def _catalog_href(line="", tag="", q="", kind=""):
     return "/catalog" + (("?" + "&".join(bits)) if bits else "")
 
 
-def _filter_links(current_line, q="", tag="", kind=""):
+def _brand_filter_links(brand="", line="", tag="", q="", kind=""):
+    brand = (brand or "").strip().lower()
+    links = []
+    for key, label in (("", "全部"), ("hasbro", "孩之寶"), ("tt", "TT")):
+        href = _catalog_href(line=line, tag=tag, q=q, kind=kind, brand=key)
+        on = " on" if (key or "") == brand else ""
+        links.append(
+            '<a class="filter%s" href="%s">%s</a>'
+            % (on, html.escape(href, quote=True), html.escape(label))
+        )
+    return '<p class="filters">%s</p>' % " ".join(links)
+
+
+def _filter_links(current_line, q="", tag="", kind="", brand=""):
     from site_pages import filter_options_html
 
     current_line = current_line or ""
     tag = (tag or "").lower()
     kind = kind or ""
+    brand = (brand or "").strip().lower()
     items = []
     kinds = [("", "全部"), ("set", "套裝"), ("bey", "整顆陀螺")]
     kinds.extend(SLOT_LABELS.items())
@@ -377,18 +731,25 @@ def _filter_links(current_line, q="", tag="", kind=""):
             kind=key,
             line=current_line if keep_line else "",
             q=q if keep_line else "",
+            brand=brand if keep_line else "",
         )
         selected = (key or "") == kind and not tag
         items.append((href, label, selected))
-    for line, label in [("CX", "CX"), ("BX", "BX"), ("UX", "UX"), ("HASBRO", "Hasbro")]:
+    for line, label in [("CX", "CX"), ("BX", "BX"), ("UX", "UX")]:
         keep_kind = kind in ("", "set", "bey")
-        href = _catalog_href(kind=kind if keep_kind else "", line=line, q=q if keep_kind else "")
+        href = _catalog_href(
+            kind=kind if keep_kind else "",
+            line=line,
+            q=q if keep_kind else "",
+            brand=brand if keep_kind else "",
+        )
         selected = line == current_line and not tag and kind in ("", "set", "bey")
         items.append((href, label, selected))
     items.extend(
         [
             (_catalog_href(tag="reprint"), "復刻", tag == "reprint"),
             (_catalog_href(tag="convention"), "限定", tag == "convention"),
+            ("/browser", "瀏覽器", False),
             ("/collection", "我的庫", False),
         ]
     )
@@ -599,14 +960,23 @@ def _part_tiles_html(catalog, slot=""):
     return rows
 
 
-def render_catalog_html(catalog, line="", tag="", q="", kind=""):
+def render_catalog_html(catalog, line="", tag="", q="", kind="", brand=""):
     catalog = catalog or {}
     kind = kind or ""
+    brand = (brand or "").strip().lower()
+    if not brand and (line or "").upper() == "HASBRO":
+        brand = "hasbro"
+        line = ""
     if kind in SLOT_LABELS or kind == "parts":
         cards = _part_tiles_html(catalog, slot="" if kind == "parts" else kind)
     else:
         rows = filter_catalog_products(
-            catalog.get("products") or {}, line=line, tag=tag, q=q, kind=kind
+            catalog.get("products") or {},
+            line=line,
+            tag=tag,
+            q=q,
+            kind=kind,
+            brand=brand,
         )
         cards = []
         for rec in rows:
@@ -618,7 +988,7 @@ def render_catalog_html(catalog, line="", tag="", q="", kind=""):
                 "%s<span class='name'>%s</span><span class='sku'>%s</span></a>"
                 % (
                     html.escape(href, quote=True),
-                    _thumb(rec.get("image_path") or "", name),
+                    _thumb(package_box_image_path(rec, catalog) or "", name),
                     html.escape(name),
                     html.escape(pid),
                 )
@@ -627,6 +997,10 @@ def render_catalog_html(catalog, line="", tag="", q="", kind=""):
     if kind:
         hidden.append(
             '<input type="hidden" name="kind" value="%s">' % html.escape(kind, quote=True)
+        )
+    if brand:
+        hidden.append(
+            '<input type="hidden" name="brand" value="%s">' % html.escape(brand, quote=True)
         )
     if line and kind not in SLOT_LABELS:
         hidden.append(
@@ -650,7 +1024,8 @@ def render_catalog_html(catalog, line="", tag="", q="", kind=""):
     grid = "\n".join(cards) if cards else "<p>沒有符合的商品</p>"
     inner = (
         '<div class="catalog-toolbar">'
-        + _filter_links(line, q=q, tag=tag, kind=kind)
+        + _brand_filter_links(brand=brand, line=line, tag=tag, q=q, kind=kind)
+        + _filter_links(line, q=q, tag=tag, kind=kind, brand=brand)
         + search
         + "</div>"
         + "<section class='panel catalog-panel'><div class='catalog-grid'>"
@@ -662,12 +1037,14 @@ def render_catalog_html(catalog, line="", tag="", q="", kind=""):
         "/catalog",
         inner,
         extra_style=CATALOG_GRID_CSS,
-        indexable=not line and not tag and not q and not kind,
+        indexable=not line and not tag and not q and not kind and not brand,
     )
 
 
 def render_catalog_product_html(catalog, product_id):
     catalog = catalog or {}
+    if is_internal_phstudy_id(product_id):
+        return None
     product = (catalog.get("products") or {}).get(product_id)
     if not product:
         return None
@@ -675,11 +1052,11 @@ def render_catalog_product_html(catalog, product_id):
     parts = catalog.get("parts") or {}
     name = product.get("name_zh") or product_id
     part_ids = product.get("part_ids") or []
+    pick = needs_variant_pick(product, variants)
+    beys = package_bey_entries(catalog, product)
     part_rows = []
-    for part_id in part_ids:
-        rec = parts.get(part_id) or {"id": part_id}
-        if not is_display_part(rec):
-            continue
+    for rec in display_parts_for_product(catalog, product):
+        part_id = rec.get("part_id") or rec.get("id")
         label = rec.get("name_zh") or rec.get("name_en") or part_id
         hub = _hub_href(rec.get("href") or "")
         part_desc = rec.get("description") or rec.get("label") or ""
@@ -697,7 +1074,7 @@ def render_catalog_product_html(catalog, product_id):
                         for part in (
                             SLOT_LABELS.get(rec.get("slot") or "", rec.get("slot") or ""),
                             part_id,
-                            rec.get("first_seen_in") or "",
+                            rec.get("set_id") or "",
                         )
                         if part
                     )
@@ -712,7 +1089,51 @@ def render_catalog_product_html(catalog, product_id):
             )
         )
     actions = ""
-    if needs_variant_pick(product, variants):
+    bey_html = ""
+    if beys:
+        cards = []
+        for bey in beys:
+            vid = bey.get("id") or ""
+            variant = variants.get(vid) or {"id": vid, "name_zh": bey.get("name")}
+            ids = parts_for_variant(variant, catalog) or part_ids
+            ids = [
+                part_id
+                for part_id in ids
+                if is_display_part(parts.get(part_id) or {"id": part_id})
+            ]
+            add = _add_button(
+                "加入此款",
+                {
+                    "data-add-variant": vid,
+                    "data-part-ids": ",".join(ids),
+                },
+            )
+            cards.append(
+                "<article class='package-bey'>"
+                "%s<div class='name'>%s</div>"
+                "<p class='sku'>%s</p>%s</article>"
+                % (
+                    _thumb(bey.get("image_path") or "", bey.get("name") or vid),
+                    html.escape(bey.get("name") or vid),
+                    html.escape("陀螺 · %s" % vid),
+                    add,
+                )
+            )
+        bey_html = "<h2>陀螺</h2><div class='catalog-grid package-beys'>%s</div>" % (
+            "\n".join(cards)
+        )
+        actions = _add_button(
+            "加入整盒",
+            {
+                "data-add-product": product_id,
+                "data-part-ids": ",".join(
+                    part_id
+                    for part_id in part_ids
+                    if is_display_part(parts.get(part_id) or {"id": part_id})
+                ),
+            },
+        )
+    elif pick:
         picks = []
         for vid in product.get("variant_ids") or []:
             variant = variants.get(vid) or {"id": vid, "name_zh": vid}
@@ -769,19 +1190,21 @@ def render_catalog_product_html(catalog, product_id):
     desc_html = (
         "<p class='desc'>%s</p>" % html.escape(desc) if desc else ""
     )
+    hero_actions = actions if actions and not str(actions).startswith("<h2>") else ""
+    after_hero = bey_html + (actions if str(actions).startswith("<h2>") else "")
     inner = (
         _filter_links(product.get("line") or "")
         + "<section class='panel'>"
         + "<div class='detail-hero'>%s<div class='meta'><div class='name'>%s</div>"
           "%s%s%s</div></div>"
         % (
-            _thumb(product.get("image_path") or "", name),
+            _thumb(package_box_image_path(product, catalog), name),
             html.escape(name),
             facts,
             desc_html,
-            actions if not needs_variant_pick(product, variants) else "",
+            hero_actions,
         )
-        + (actions if needs_variant_pick(product, variants) else "")
+        + after_hero
         + "<h2>香港舖頭</h2>"
         + _shops_delay_note_html()
         + "<div id='catalog-shops' data-src='/catalog/%s/shops'>"
@@ -802,15 +1225,34 @@ def render_parts_html(catalog, slot=""):
     return render_catalog_html(catalog, kind="parts")
 
 
+def _product_uses_part_as_slot(catalog, product_id, part_id, slot):
+    product = ((catalog or {}).get("products") or {}).get(product_id)
+    if not product:
+        return False
+    for row in display_parts_for_product(catalog, product):
+        rid = str(row.get("part_id") or row.get("id") or "")
+        if rid != str(part_id):
+            continue
+        rslot = row.get("slot") or guess_slot(rid)
+        if slot and rslot and rslot != slot:
+            continue
+        return True
+    return False
+
+
 def render_part_detail_html(catalog, part_id):
     catalog = catalog or {}
     rec = (catalog.get("parts") or {}).get(part_id)
     if not rec:
         return None
     label = rec.get("name_zh") or rec.get("name_en") or part_id
+    part_slot = rec.get("slot") or guess_slot(part_id)
     releases = []
     for rid in rec.get("release_ids") or []:
         rel = (catalog.get("part_releases") or {}).get(rid) or {"id": rid}
+        rel_slot = rel.get("slot") or guess_slot(rel.get("part_id") or rid)
+        if part_slot and rel_slot and rel_slot != part_slot:
+            continue
         set_id = rel.get("set_id") or rel.get("base_set_id") or ""
         set_href = (
             "/catalog/" + urllib.parse.quote(str(set_id), safe="-") if set_id else ""
@@ -835,9 +1277,17 @@ def render_part_detail_html(catalog, part_id):
                 ),
             )
         )
-    used = rec.get("used_in") or []
+    used = [
+        pid
+        for pid in (rec.get("used_in") or [])
+        if _product_uses_part_as_slot(catalog, pid, part_id, part_slot)
+    ]
     related = [_product_ref_html(catalog, pid) for pid in used]
-    first_id = rec.get("first_seen_in") or (used[0] if used else "")
+    first_id = rec.get("first_seen_in") or ""
+    if first_id and first_id not in used:
+        first_id = used[0] if used else ""
+    elif not first_id:
+        first_id = used[0] if used else ""
     first_html = ""
     if first_id:
         first_html = _product_ref_html(catalog, first_id)
@@ -884,9 +1334,85 @@ def render_part_detail_html(catalog, part_id):
     return _page(str(label), "/parts/" + part_id, inner, extra_style=CATALOG_GRID_CSS)
 
 
+def _browser_chip(group, value, label):
+    return (
+        '<button type="button" class="filter" data-group="%s" data-value="%s">%s</button>'
+        % (
+            html.escape(group, quote=True),
+            html.escape(value, quote=True),
+            html.escape(label),
+        )
+    )
+
+
+def render_browser_html(catalog):
+    items = browser_items(catalog)
+    payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
+    line_chips = "".join(
+        _browser_chip("line" if key != "tag" else "tag", value, label)
+        for key, value, label in (
+            ("line", "", "全部"),
+            ("line", "BX", "BX"),
+            ("line", "UX", "UX"),
+            ("line", "CX", "CX"),
+            ("tag", "reprint", "復刻"),
+            ("tag", "convention", "限定"),
+        )
+    )
+    kind_chips = _browser_chip("kind", "series", "系列") + _browser_chip("kind", "set", "套裝")
+    for slot, label in SLOT_LABELS.items():
+        kind_chips += _browser_chip("kind", slot, label)
+    brand_chips = "".join(
+        _browser_chip("brand", key, label)
+        for key, label in (("", "全部"), ("hasbro", "孩之寶"), ("tt", "TT"))
+    )
+    inner = (
+        '<div class="catalog-toolbar" id="browser-app">'
+        '<p class="filters">%s</p>'
+        '<p class="filters">%s</p>'
+        '<p class="filters">%s</p>'
+        '<div class="filter-store"><p class="filter-store-label">搜尋／排序</p>'
+        '<div class="browser-controls">'
+        '<input id="browser-q" type="search" placeholder="搜尋 CX-18 / 腕龍" autocomplete="off">'
+        '<select id="browser-sort" aria-label="排序">'
+        '<option value="default">預設排序</option>'
+        '<option value="name">名稱</option>'
+        '<option value="released_on">發售日期</option>'
+        '<option value="price">價格</option>'
+        "</select>"
+        '<div class="browser-view" id="browser-view">'
+        '<button type="button" data-view="grid">圖示</button>'
+        '<button type="button" data-view="table">表格</button>'
+        "</div>"
+        '<span id="browser-count"></span>'
+        "</div>"
+        '<p class="filters"><a class="filter" href="/catalog">圖鑑</a> '
+        '<a class="filter" href="/parts">零件</a> '
+        '<a class="filter" href="/collection">我的庫</a></p>'
+        "</div></div>"
+        "<section class='panel catalog-panel'>"
+        "<div class='catalog-grid' id='browser-grid'></div>"
+        "<table class='browser-table' id='browser-table' hidden>"
+        "<thead><tr><th></th><th>名稱</th><th>編號</th><th>系列／零件</th>"
+        "<th>發售</th><th>價格</th></tr></thead><tbody></tbody></table>"
+        "</section>"
+        '<script type="application/json" id="browser-data">%s</script>'
+        % (line_chips, kind_chips, brand_chips, payload)
+    )
+    return _page(
+        "瀏覽器",
+        "/browser",
+        inner,
+        extra_style=CATALOG_GRID_CSS,
+        indexable=True,
+        extra_script=BROWSER_JS,
+    )
+
+
 def render_collection_html():
     inner = (
         '<p class="filters"><a class="filter" href="/catalog">圖鑑</a> '
+        '<a class="filter" href="/browser">瀏覽器</a> '
         '<a class="filter" href="/parts">零件</a></p>'
         "<section class='panel'>"
         "<p class='coffee-copy'>倉庫只存在這個瀏覽器。之後登入才能同步。</p>"
@@ -925,6 +1451,7 @@ def handle_catalog_http(path, query, catalog=None):
             tag=(parsed_q.get("tag") or [""])[0],
             q=(parsed_q.get("q") or [""])[0],
             kind=(parsed_q.get("kind") or [""])[0],
+            brand=(parsed_q.get("brand") or [""])[0],
         )
         return {"status": 200, "html": html_page}
     if path.startswith("/catalog/") and path.endswith("/shops"):
@@ -962,6 +1489,8 @@ def handle_catalog_http(path, query, catalog=None):
             "html": html_page,
             "cache": CATALOG_DETAIL_CACHE_CONTROL,
         }
+    if path in ("/browser", "/browser/"):
+        return {"status": 200, "html": render_browser_html(catalog)}
     if path == "/collection":
         return {"status": 200, "html": render_collection_html()}
     return None

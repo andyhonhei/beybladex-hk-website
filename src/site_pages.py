@@ -549,6 +549,7 @@ def sitemap_xml(cfg=None):
         OG_HOME_PATH,
         "/shops",
         "/catalog",
+        "/browser",
         "/parts",
         "/collection",
         SUBSCRIBE_PATH,
@@ -817,7 +818,9 @@ def render_og_test_html(path=None):
 
 
 def render_shops_html(cfg=None, payload=None):
-    cfg = cfg if cfg is not None else CONFIG
+    import site_data
+
+    cfg = cfg if cfg is not None else site_data.CONFIG
     payload = payload or {}
     title = "店舖現況 · %s" % SITE_BRAND
     desc = THREADS_SUBSCRIBE_DESC
@@ -1523,6 +1526,7 @@ def site_nav_html(subscribe=True):
         '<nav class="site-nav">'
         "%s"
         '<div class="nav-end">'
+        '<a class="nav-btn" href="/browser">瀏覽器</a>'
         '<a class="nav-btn" href="/shops">店舖現況</a>'
         '<a class="nav-btn" href="%s">全部現貨</a>'
         '<a class="nav-btn" href="/history">最新通知</a>'
