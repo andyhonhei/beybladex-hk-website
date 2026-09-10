@@ -35,6 +35,17 @@ DEFAULT_ERROR_STATE = os.path.join(DATA_DIR, "watch_errors.json")
 STATUS_PATH = os.path.join(DATA_DIR, "watch_status.json")
 EVENT_LOG_PATH = os.path.join(DATA_DIR, "watch_events.jsonl")
 NOTIFY_HISTORY_PATH = os.path.join(DATA_DIR, "notify_history.jsonl")
+
+
+def image_data_dir():
+    watch_data = os.environ.get("BEYBLADE_WATCH_DATA_DIR", "").strip()
+    if not watch_data:
+        watch_data = "/home/ubuntu/hobbyland_checknew_product/data"
+    if os.path.isdir(os.path.join(watch_data, "images")):
+        return watch_data
+    return DATA_DIR
+
+
 CONFIG = {}
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -46,7 +57,7 @@ CATEGORY = "nproduct_booking"
 CATEGORY_URL = SHOP_ORIGIN + "/product-category/" + CATEGORY
 DISCORD_INVITE_URL = "https://discord.gg/qpnuMgBv8"
 TELEGRAM_INVITE_URL = "https://t.me/+mbTPVeGFBalhMjQ9"
-THREADS_PROFILE_URL = "https://www.threads.com/@beybladex_hk_watch"
+THREADS_PROFILE_URL = "https://www.threads.com/@beybladex_hk_notify"
 THREADS_SUBSCRIBE_DESC = "香港爆旋陀螺到貨通知。Online舖頭 有新品、補貨、缺貨就出帖。非官方。"
 THREADS_SUBSCRIBE_HINT = "Follow 我哋 Threads 之後記得撳右上角訂閱／鐘仔掣，訂閱帖文通知"
 THREADS_SUBSCRIBE_ASK = (
