@@ -406,7 +406,7 @@ class StatusPageTests(unittest.TestCase):
         self.assertEqual(names, ["Telegram", "Discord", "Threads"])
         self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", markup)
         self.assertIn("https://discord.gg/qpnuMgBv8", markup)
-        self.assertIn("https://www.threads.com/@beybladex_hk_notify", markup)
+        self.assertIn("https://www.threads.com/@beybladex_restock_notify_hk", markup)
         self.assertIn("香港爆旋陀螺到貨通知", markup)
         self.assertIn('<a href="/shops">Online舖頭</a>', markup)
         self.assertNotIn("本地舖頭", markup)
@@ -501,7 +501,7 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn("訂閱通知", page)
         self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", page)
         self.assertIn("https://discord.gg/qpnuMgBv8", page)
-        self.assertIn("https://www.threads.com/@beybladex_hk_notify", page)
+        self.assertIn("https://www.threads.com/@beybladex_restock_notify_hk", page)
         self.assertIn("加入群組", page)
         self.assertIn("加入頻道", page)
         self.assertIn("鐘仔", page)
@@ -612,7 +612,7 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn('id="subscribe-hero-btn"', page)
         self.assertNotIn(">/\\\\-_ =+|  beybladex  |+= _-/\\\\</button>", page)
         self.assertIn('class="ascii"', page)
-        self.assertIn("https://www.threads.com/@beybladex_hk_notify", page)
+        self.assertIn("https://www.threads.com/@beybladex_restock_notify_hk", page)
         self.assertIn("https://discord.gg/qpnuMgBv8", page)
         self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", page)
         self.assertIn("subscribe-method", page)
@@ -1656,7 +1656,7 @@ class GoTrackTests(unittest.TestCase):
         )
         self.assertIn("discord.gg/qpnuMgBv8", page)
         self.assertIn("t.me/+mbTPVeGFBalhMjQ9", page)
-        self.assertIn("threads.com/@beybladex_hk_notify", page)
+        self.assertIn("threads.com/@beybladex_restock_notify_hk", page)
         self.assertIn(
             "Follow 我哋 Threads 之後記得撳右上角訂閱／鐘仔掣，訂閱帖文通知",
             page,
