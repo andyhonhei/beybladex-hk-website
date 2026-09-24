@@ -405,7 +405,7 @@ class StatusPageTests(unittest.TestCase):
         names = re.findall(r'class="subscribe-name">([^<]+)', markup)
         self.assertEqual(names, ["Telegram", "Discord", "Threads"])
         self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", markup)
-        self.assertIn("https://discord.gg/qpnuMgBv8", markup)
+        self.assertIn("https://discord.gg/C8Q5gZf3y5", markup)
         self.assertIn("https://www.threads.com/@beybladex_restock_notify_hk", markup)
         self.assertIn("香港爆旋陀螺到貨通知", markup)
         self.assertIn('<a href="/shops">Online舖頭</a>', markup)
@@ -500,7 +500,7 @@ class StatusPageTests(unittest.TestCase):
         page = render_subscribe_html()
         self.assertIn("訂閱通知", page)
         self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", page)
-        self.assertIn("https://discord.gg/qpnuMgBv8", page)
+        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
         self.assertIn("https://www.threads.com/@beybladex_restock_notify_hk", page)
         self.assertIn("加入群組", page)
         self.assertIn("加入頻道", page)
@@ -613,7 +613,7 @@ class StatusPageTests(unittest.TestCase):
         self.assertNotIn(">/\\\\-_ =+|  beybladex  |+= _-/\\\\</button>", page)
         self.assertIn('class="ascii"', page)
         self.assertIn("https://www.threads.com/@beybladex_restock_notify_hk", page)
-        self.assertIn("https://discord.gg/qpnuMgBv8", page)
+        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
         self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", page)
         self.assertIn("subscribe-method", page)
         self.assertIn("Threads", page)
@@ -1654,7 +1654,7 @@ class GoTrackTests(unittest.TestCase):
             'property="og:description" content="Hobbyland 爆旋陀螺新品預訂分類，官方授權香港代理商品。"',
             bounce,
         )
-        self.assertIn("discord.gg/qpnuMgBv8", page)
+        self.assertIn("discord.gg/C8Q5gZf3y5", page)
         self.assertIn("t.me/+mbTPVeGFBalhMjQ9", page)
         self.assertIn("threads.com/@beybladex_restock_notify_hk", page)
         self.assertIn(
