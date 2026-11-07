@@ -1,0 +1,18 @@
+# Local secrets and runtime state
+config/watch_config.json
+data/
+watch_config.json
+watch.log
+watch.err
+watch.lock
+watch_errors.json
+watch_events.jsonl
+watch_record.log
+watch_status.json
+*_seen_skus.json
+seen_skus.json
+__pycache__/
+*.pyc
+.history/
+.DS_Store
+.worktrees/

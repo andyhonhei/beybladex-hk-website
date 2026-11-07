@@ -1,0 +1,33 @@
+{
+  "name": "beybladex-privacy",
+  "main": "beybladex-privacy.js",
+  "compatibility_date": "2026-08-31",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "hkbeybladex.com/privacy",
+      "zone_name": "hkbeybladex.com"
+    },
+    {
+      "pattern": "hkbeybladex.com/privacy-policy",
+      "zone_name": "hkbeybladex.com"
+    },
+    {
+      "pattern": "hkbeybladex.com/privacy*",
+      "zone_name": "hkbeybladex.com"
+    },
+    {
+      "pattern": "hkbeybladex.com/terms",
+      "zone_name": "hkbeybladex.com"
+    },
+    {
+      "pattern": "hkbeybladex.com/terms-of-service",
+      "zone_name": "hkbeybladex.com"
+    },
+    {
+      "pattern": "hkbeybladex.com/terms*",
+      "zone_name": "hkbeybladex.com"
+    }
+  ]
+}

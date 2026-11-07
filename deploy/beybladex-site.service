@@ -1,0 +1,18 @@
+[Unit]
+Description=Beyblade X HK public website (HTTP status + catalog)
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/beybladex-hk-website
+Environment=PYTHONUNBUFFERED=1
+Environment=BEYBLADE_CDN_ORIGIN=https://beybladex-cdn.andyhhh.com
+Environment=BEYBLADE_DATA_DIR=/home/ubuntu/beybladex_hk_notify/data
+ExecStart=/usr/bin/python3 /home/ubuntu/beybladex-hk-website/src/beyblade_site.py --config /home/ubuntu/beybladex_hk_notify/config/watch_config.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

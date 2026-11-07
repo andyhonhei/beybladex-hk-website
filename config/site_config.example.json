@@ -1,0 +1,14 @@
+{
+  "status": {"enabled": true, "host": "127.0.0.1", "port": 8080},
+  "storage": {
+    "mysql": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 3306,
+      "user": "watch",
+      "password": "",
+      "database": "beyblade_watch"
+    }
+  },
+  "admin": {"username": "", "password": "", "host": "beybladex-admin.andyhhh.com"}
+}
