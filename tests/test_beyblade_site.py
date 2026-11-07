@@ -1552,6 +1552,7 @@ class GoTrackTests(unittest.TestCase):
             "https://www.hobbylandeshop.com/product-category/nproduct_booking",
         )
         self.assertIn("location.replace(dest)", result["html"])
+        self.assertNotIn('http-equiv="refresh"', result["html"])
         self.assertIn("gtag('config', 'G-19VVZP9R25')", result["html"])
         self.assertIn("前往商店", result["html"])
         self.assertNotIn("以後唔好再顯示", result["html"])
@@ -1580,10 +1581,19 @@ class GoTrackTests(unittest.TestCase):
             result["html"],
         )
         self.assertIn("og-card.jpg", result["html"])
+        self.assertNotIn('http-equiv="refresh"', result["html"])
         self.assertNotIn(
             'property="og:url" content="https://www.hobbylandeshop.com/',
             result["html"],
         )
+        telegram = go_http_result(
+            "/go/uat/test",
+            query="from=telegram",
+            user_agent="TelegramBot (like TwitterBot)",
+        )
+        self.assertNotIn('http-equiv="refresh"', telegram["html"])
+        self.assertIn("location.replace(dest)", telegram["html"])
+        self.assertIn('property="og:title"', telegram["html"])
         preview = go_http_result("/go/uat/preview", query="from=threads")
         self.assertEqual(preview["status"], 200)
         self.assertIn('property="og:title" content="HK BeybladeX Watch"', preview["html"])

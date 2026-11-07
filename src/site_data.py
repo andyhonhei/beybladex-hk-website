@@ -38,11 +38,18 @@ NOTIFY_HISTORY_PATH = os.path.join(DATA_DIR, "notify_history.jsonl")
 
 
 def image_data_dir():
-    watch_data = os.environ.get("BEYBLADE_WATCH_DATA_DIR", "").strip()
-    if not watch_data:
-        watch_data = "/home/ubuntu/hobbyland_checknew_product/data"
-    if os.path.isdir(os.path.join(watch_data, "images")):
-        return watch_data
+    candidates = []
+    for key in ("BEYBLADE_DATA_DIR", "BEYBLADE_WATCH_DATA_DIR"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            candidates.append(value)
+    candidates.extend([
+        "/home/ubuntu/beybladex_hk_notify/data",
+        "/home/ubuntu/hobbyland_checknew_product/data",
+    ])
+    for watch_data in candidates:
+        if os.path.isdir(os.path.join(watch_data, "images")):
+            return watch_data
     return DATA_DIR
 
 
@@ -449,14 +456,20 @@ def shopline_og_image_url(image):
 
 def go_og_image_url(item, shop_id=""):
     item = item or {}
-    rel = str(item.get("image_path") or "").replace("\\", "/")
+    recorded = str(item.get("image_path") or "").replace("\\", "/")
+    rel = recorded
     if not (rel.startswith("images/") and ".." not in rel):
         sku = item.get("sku") or ""
         rel = product_image_path(shop_id, sku) if shop_id and sku else ""
-    if rel.startswith("images/") and ".." not in rel:
-        dest = os.path.join(DATA_DIR, rel)
-        if os.path.isfile(dest) and os.path.getsize(dest) >= IMAGE_MIN_CACHE_BYTES:
-            return cdn_image_url("/" + rel) + "?v=" + str(int(os.path.getmtime(dest)))
+    if not (rel.startswith("images/") and ".." not in rel):
+        return seo_image_url()
+    dest = os.path.join(image_data_dir(), rel)
+    if os.path.isfile(dest) and os.path.getsize(dest) >= IMAGE_MIN_CACHE_BYTES:
+        return cdn_image_url("/" + rel) + "?v=" + str(int(os.path.getmtime(dest)))
+    # The website process often does not have the jpeg locally. The CDN still
+    # serves images/{shop}/{sku}.jpg when image_path was saved with the product.
+    if recorded.startswith("images/") and ".." not in recorded:
+        return cdn_image_url("/" + recorded)
     return seo_image_url()
 
 
@@ -470,11 +483,13 @@ def go_target_from_item(item, shop_id=""):
         image = SITE_ORIGIN + image
     if not image:
         image = seo_image_url()
+    recorded = str(item.get("image_path") or "").replace("\\", "/")
     status = item.get("status_label") or status_text(product_stock_key(item))
     return {
         "title": item.get("title") or item.get("sku") or SITE_BRAND,
         "dest": dest,
         "image": image,
+        "image_path": recorded if recorded.startswith("images/") and ".." not in recorded else "",
         "og_image": go_og_image_url(item, shop_id),
         "price": item.get("price") or "",
         "status": status,
@@ -498,12 +513,18 @@ def go_http_result(path, query="", cookie="", remember=False, force_store=False,
     if not target:
         return {"status": 404}
     if shop_id and shop_id != UAT_GO_SHOP and sku and is_preview_crawler(user_agent):
-        item = {"sku": sku, "image": target.get("image")}
+        item = {
+            "sku": sku,
+            "image": target.get("image"),
+            "image_path": target.get("image_path") or "",
+        }
         cache_product_image(shop_id, item, prefetch=True)
         target = dict(target)
         target["og_image"] = go_og_image_url(item, shop_id)
     qs = urllib.parse.parse_qs(query or "")
     source = str((qs.get("from") or [""])[0] or "").strip().lower()
+    # Browsers leave with location.replace. Preview crawlers do not run that
+    # script, and there is no meta refresh for them to follow.
     bounce = remember or force_store or source in ("discord", "telegram", "macos")
     page_url = go_request_url(path, query)
     return {

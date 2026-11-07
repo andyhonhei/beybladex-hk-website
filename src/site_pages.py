@@ -1311,20 +1311,14 @@ def render_go_bounce_html(target, shop_id, sku, page_url=None):
 <html lang="zh-Hant" prefix="og: https://ogp.me/ns#">
 <head>
 %s
-<meta http-equiv="refresh" content="1;url=%s">
 </head>
 <body>
 <p><a href="%s">前往商店</a></p>
 <script>
 (function(){
   var dest=%s;
-  var gone=false;
-  function go(){
-    if(gone||!dest)return;
-    gone=true;
-    location.replace(dest);
-  }
-  setTimeout(go, 400);
+  if(!dest)return;
+  location.replace(dest);
 })();
 </script>
 </body>
@@ -1340,7 +1334,6 @@ def render_go_bounce_html(target, shop_id, sku, page_url=None):
             image_width=og_w,
             image_height=og_h,
         ),
-        dest_attr,
         dest_attr,
         dest_js,
     )
