@@ -2886,6 +2886,38 @@ class ModelGridTests(unittest.TestCase):
         self.assertIn("BX [1]", page)
         self.assertIn('href="/models?stock=in&amp;tag=CX"', page)
 
+    def test_models_kuji_filter_is_separate_from_other(self):
+        items = [
+            {
+                "sku": "kuji",
+                "shop_id": "h1",
+                "title": "BeybladeX 陀螺 x DMM 一番賞 Vol.2 G賞",
+                "tag": "other",
+                "price": "80",
+                "status": "in_stock",
+                "image": "https://cdn.example/kuji.jpg",
+            },
+            {
+                "sku": "misc",
+                "shop_id": "h1",
+                "title": "Mystery blade",
+                "tag": "other",
+                "price": "40",
+                "status": "in_stock",
+            },
+        ]
+        page = render_models_html(items)
+        self.assertIn("一番賞 [1]", page)
+        self.assertIn("other [1]", page)
+        self.assertIn('href="/models?tag=kuji"', page)
+        kuji = render_models_html(items, tag_filter="kuji")
+        self.assertIn("KUJI-DMM-V2-G", kuji)
+        self.assertIn("https://cdn.example/kuji.jpg", kuji)
+        self.assertNotIn("Mystery blade", kuji)
+        other = render_models_html(items, tag_filter="other")
+        self.assertIn("Mystery blade", other)
+        self.assertNotIn("KUJI-DMM-V2-G", other)
+
     def test_models_stock_filter_keeps_matching_offers(self):
         items = [
             {

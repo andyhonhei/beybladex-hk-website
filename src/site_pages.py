@@ -1426,7 +1426,7 @@ def models_href(tag=None, stock=None):
         query.append(("stock", "in"))
     elif stock == "out_of_stock":
         query.append(("stock", "out"))
-    if tag in ("CX", "BX", "UX", "other"):
+    if tag in ("CX", "BX", "UX", "kuji", "other"):
         query.append(("tag", tag))
     if query:
         return "/models?" + urllib.parse.urlencode(query)
@@ -1824,7 +1824,7 @@ def model_modal_html():
 def render_models_html(items, tag_filter="", stock_filter=""):
     items = list(items or [])
     groups = group_listings_by_model(items)
-    tag_counts = {"CX": 0, "BX": 0, "UX": 0, "other": 0}
+    tag_counts = {"CX": 0, "BX": 0, "UX": 0, "kuji": 0, "other": 0}
     in_count = 0
     out_count = 0
     for group in groups:
@@ -1869,7 +1869,7 @@ def render_models_html(items, tag_filter="", stock_filter=""):
 
     filters = (
         '<p class="filters">%s %s %s</p>'
-        '<p class="filters">%s %s %s %s %s</p>'
+        '<p class="filters">%s %s %s %s %s %s</p>'
         % (
             stock_link("", "全部 %s" % len(groups)),
             stock_link("in_stock", "有貨 %s" % in_count),
@@ -1878,6 +1878,7 @@ def render_models_html(items, tag_filter="", stock_filter=""):
             tag_link("CX", "CX [%s]" % tag_counts["CX"]),
             tag_link("BX", "BX [%s]" % tag_counts["BX"]),
             tag_link("UX", "UX [%s]" % tag_counts["UX"]),
+            tag_link("kuji", "一番賞 [%s]" % tag_counts["kuji"]),
             tag_link("other", "other [%s]" % tag_counts["other"]),
         )
     )
@@ -2397,7 +2398,7 @@ def render_products_html(shop, items, key_query="", stock_filter="", tag_filter=
     shop_id = shop.get("id") or ""
     in_count = sum(1 for item in (items or []) if product_stock_key(item) == "in_stock")
     out_count = sum(1 for item in (items or []) if product_stock_key(item) == "out_of_stock")
-    tag_counts = {"CX": 0, "BX": 0, "UX": 0, "other": 0}
+    tag_counts = {"CX": 0, "BX": 0, "UX": 0, "kuji": 0, "other": 0}
     for item in items or []:
         tag = product_tag_key(item)
         if tag in tag_counts:
@@ -2421,7 +2422,7 @@ def render_products_html(shop, items, key_query="", stock_filter="", tag_filter=
 
     filters = (
         '<p class="filters">%s %s %s</p>'
-        '<p class="filters">%s %s %s %s %s</p>'
+        '<p class="filters">%s %s %s %s %s %s</p>'
         % (
             filter_link("", "全部 %s" % len(items or [])),
             filter_link("in_stock", "有貨 %s" % in_count),
@@ -2430,6 +2431,7 @@ def render_products_html(shop, items, key_query="", stock_filter="", tag_filter=
             tag_link("CX", "CX [%s]" % tag_counts["CX"]),
             tag_link("BX", "BX [%s]" % tag_counts["BX"]),
             tag_link("UX", "UX [%s]" % tag_counts["UX"]),
+            tag_link("kuji", "一番賞 [%s]" % tag_counts["kuji"]),
             tag_link("other", "other [%s]" % tag_counts["other"]),
         )
     )

@@ -3116,7 +3116,7 @@ def shop_products_href(shop_id, stock=None, tag=None):
         query.append(("stock", "in"))
     elif stock == "out_of_stock":
         query.append(("stock", "out"))
-    if tag in ("CX", "BX", "UX", "other"):
+    if tag in ("CX", "BX", "UX", "kuji", "other"):
         query.append(("tag", tag))
     if query:
         return path + "?" + urllib.parse.urlencode(query)
@@ -3144,6 +3144,8 @@ def tag_filter_from_query(query):
             break
     if raw.lower() == "other":
         return "other"
+    if raw.lower() in ("kuji", "ichiban", "一番賞"):
+        return "kuji"
     upper = raw.upper()
     if upper in ("CX", "BX", "UX"):
         return upper
@@ -3164,10 +3166,13 @@ def product_stock_key(item):
 
 
 def product_tag_key(item):
+    model = listing_model_code(item)
+    if model.startswith("KUJI"):
+        return "kuji"
     tag = str((item or {}).get("tag") or "").strip()
     if tag:
-        if tag.lower() == "other":
-            return "other"
+        if tag.lower() in ("other", "kuji"):
+            return tag.lower()
         return tag.upper()
     return product_line_fields(item)["tag"]
 
@@ -3237,7 +3242,7 @@ def group_listings_by_model(items):
 def group_tag_key(group):
     model = str((group or {}).get("model") or "")
     if model.startswith("KUJI"):
-        return "other"
+        return "kuji"
     if re.match(r"^(CX|BX|UX)G", model):
         for item in (group or {}).get("items") or []:
             tag = product_line_fields(item).get("tag")
