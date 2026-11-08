@@ -32,14 +32,17 @@ from site_data import (
     go_http_result,
     go_page_target,
     go_target_from_item,
+    group_listings_by_model,
     is_admin_host,
     is_preview_crawler,
+    listing_model_code,
     listing_state_fingerprint,
     load_config,
     load_notify_history,
     load_shop_products_for_shop_id,
     mysql_ok_cached,
     parse_go_path,
+    prune_edge_purge_log,
     purge_edge_cache,
     request_edge_purge,
     reset_edge_purge_state,
@@ -65,6 +68,7 @@ from site_pages import (
     render_go_bounce_html,
     render_go_html,
     render_history_html,
+    render_models_html,
     render_notify_test_html,
     render_og_test_html,
     render_privacy_html,
@@ -156,8 +160,8 @@ class StatusPageTests(unittest.TestCase):
         names = re.findall(r'class="subscribe-name">([^<]+)', markup)
         self.assertEqual(names, ["Telegram", "Discord", "Threads"])
         self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", markup)
-        self.assertIn("https://discord.gg/qpnuMgBv8", markup)
-        self.assertIn("https://www.threads.com/@hkbeybladex_com", markup)
+        self.assertIn("https://discord.gg/C8Q5gZf3y5", markup)
+        self.assertIn("https://discord.gg/C8Q5gZf3y5", markup)
         self.assertIn("香港爆旋陀螺到貨通知", markup)
         self.assertIn('<a href="/shops">Online舖頭</a>', markup)
         self.assertNotIn("本地舖頭", markup)
@@ -286,8 +290,8 @@ class StatusPageTests(unittest.TestCase):
         page = render_subscribe_html()
         self.assertIn("訂閱通知", page)
         self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", page)
-        self.assertIn("https://discord.gg/qpnuMgBv8", page)
-        self.assertIn("https://www.threads.com/@hkbeybladex_com", page)
+        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
+        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
         self.assertIn("加入群組", page)
         self.assertIn("加入頻道", page)
         self.assertIn("鐘仔", page)
@@ -391,8 +395,8 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn('id="subscribe-hero-btn"', page)
         self.assertNotIn(">/\\\\-_ =+|  beybladex  |+= _-/\\\\</button>", page)
         self.assertIn('class="ascii"', page)
-        self.assertIn("https://www.threads.com/@hkbeybladex_com", page)
-        self.assertIn("https://discord.gg/qpnuMgBv8", page)
+        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
+        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
         self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", page)
         self.assertIn("subscribe-method", page)
         self.assertIn("Threads", page)
@@ -1433,17 +1437,22 @@ class GoTrackTests(unittest.TestCase):
             "https://www.hobbylandeshop.com/product-category/nproduct_booking",
         )
         self.assertIn("location.replace(dest)", result["html"])
+        self.assertIn("setTimeout(go, 500)", result["html"])
+        self.assertIn("go-loading", result["html"])
         self.assertNotIn('http-equiv="refresh"', result["html"])
         self.assertIn("gtag('config', 'G-19VVZP9R25')", result["html"])
+        self.assertIn("transport_type:'beacon'", result["html"])
         self.assertIn("前往商店", result["html"])
         self.assertNotIn("以後唔好再顯示", result["html"])
-        self.assertEqual(result.get("cache"), GO_CACHE_CONTROL)
+        self.assertEqual(result.get("cache"), "private, no-store")
 
-    def test_go_http_threads_shows_interstitial(self):
+    def test_go_http_threads_shows_loading_for_browsers(self):
         result = go_http_result("/go/uat/test", query="from=threads")
         self.assertEqual(result["status"], 200)
-        self.assertEqual(result.get("cache"), GO_CACHE_CONTROL)
-        self.assertIn(
+        self.assertEqual(result.get("cache"), "private, no-store")
+        self.assertIn("go-loading", result["html"])
+        self.assertIn("setTimeout(go, 500)", result["html"])
+        self.assertNotIn(
             "Follow 我哋 Threads 之後記得撳右上角訂閱／鐘仔掣，訂閱帖文通知",
             result["html"],
         )
@@ -1455,7 +1464,7 @@ class GoTrackTests(unittest.TestCase):
             user_agent="facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
         )
         self.assertEqual(result["status"], 200)
-        self.assertEqual(result.get("cache"), GO_CACHE_CONTROL)
+        self.assertEqual(result.get("cache"), "private, no-store")
         self.assertIn('property="og:title"', result["html"])
         self.assertIn(
             'property="og:url" content="https://hkbeybladex.com/go/uat/test?from=threads"',
@@ -1463,6 +1472,8 @@ class GoTrackTests(unittest.TestCase):
         )
         self.assertIn("og-card.jpg", result["html"])
         self.assertNotIn('http-equiv="refresh"', result["html"])
+        self.assertNotIn("location.replace(dest)", result["html"])
+        self.assertNotIn("go-loading", result["html"])
         self.assertNotIn(
             'property="og:url" content="https://www.hobbylandeshop.com/',
             result["html"],
@@ -1473,8 +1484,12 @@ class GoTrackTests(unittest.TestCase):
             user_agent="TelegramBot (like TwitterBot)",
         )
         self.assertNotIn('http-equiv="refresh"', telegram["html"])
-        self.assertIn("location.replace(dest)", telegram["html"])
+        self.assertNotIn("location.replace(dest)", telegram["html"])
+        self.assertNotIn("go-loading", telegram["html"])
         self.assertIn('property="og:title"', telegram["html"])
+        human = go_http_result("/go/uat/test", query="from=telegram")
+        self.assertIn("go-loading", human["html"])
+        self.assertIn("setTimeout(go, 500)", human["html"])
         preview = go_http_result("/go/uat/preview", query="from=threads")
         self.assertEqual(preview["status"], 200)
         self.assertIn('property="og:title" content="HK BeybladeX Watch"', preview["html"])
@@ -1508,22 +1523,20 @@ class GoTrackTests(unittest.TestCase):
         self.assertNotIn("以後唔好再顯示", invite["html"])
         self.assertNotIn("以後不顯示", invite["html"])
         self.assertNotIn("bxw_go_skip", invite["html"])
-        self.assertNotIn("location.replace(dest)", invite["html"])
+        self.assertIn("location.replace(dest)", invite["html"])
+        self.assertIn("setTimeout(go, 500)", invite["html"])
         with_cookie = go_http_result(
             "/go/uat/test",
             query="from=threads",
             cookie="bxw_go_skip=1",
         )
         self.assertNotIn("以後唔好再顯示", with_cookie["html"])
-        self.assertNotIn("location.replace(dest)", with_cookie["html"])
+        self.assertIn("location.replace(dest)", with_cookie["html"])
         leftover = go_http_result("/go/uat/test", query="from=threads&skip=1")
         self.assertEqual(leftover["status"], 200)
-        self.assertEqual(leftover.get("cache"), GO_CACHE_CONTROL)
-        self.assertNotIn("location.replace(dest)", leftover["html"])
-        self.assertIn(
-            "Follow 我哋 Threads 之後記得撳右上角訂閱／鐘仔掣，訂閱帖文通知",
-            leftover["html"],
-        )
+        self.assertEqual(leftover.get("cache"), "private, no-store")
+        self.assertIn("location.replace(dest)", leftover["html"])
+        self.assertIn("setTimeout(go, 500)", leftover["html"])
 
     def test_go_page_invites_and_keeps_store_seo(self):
         page = render_go_html(go_page_target("uat", "test"), "uat", "test")
@@ -1546,10 +1559,12 @@ class GoTrackTests(unittest.TestCase):
             bounce,
         )
         self.assertIn("location.replace(dest)", bounce)
+        self.assertIn("setTimeout(go, 500)", bounce)
+        self.assertIn("go-loading", bounce)
         self.assertNotIn('http-equiv="refresh"', bounce)
-        self.assertIn("discord.gg/qpnuMgBv8", page)
+        self.assertIn("discord.gg/C8Q5gZf3y5", page)
         self.assertIn("t.me/+mbTPVeGFBalhMjQ9", page)
-        self.assertIn("threads.com/@hkbeybladex_com", page)
+        self.assertIn("discord.gg/C8Q5gZf3y5", page)
         self.assertIn(
             "Follow 我哋 Threads 之後記得撳右上角訂閱／鐘仔掣，訂閱帖文通知",
             page,
@@ -1743,6 +1758,68 @@ class StatusPageCacheTests(unittest.TestCase):
             IMAGE_CACHE_CONTROL,
             "public, max-age=31536000, s-maxage=31536000, immutable",
         )
+
+    def test_load_config_merges_local_cloudflare_token(self):
+        folder = tempfile.mkdtemp()
+        base = os.path.join(folder, "watch_config.json")
+        local = os.path.join(folder, "watch_config.local.json")
+        with open(base, "w", encoding="utf-8") as fh:
+            json.dump({"status": {"enabled": True}}, fh)
+        with open(local, "w", encoding="utf-8") as fh:
+            json.dump({"cloudflare": {"api_token": "secret-token", "zone_id": "zone"}}, fh)
+        cfg = load_config(base)
+        self.assertEqual(cfg["cloudflare"]["api_token"], "secret-token")
+        self.assertEqual(cfg["cloudflare"]["zone_id"], "zone")
+        self.assertTrue(cfg["status"]["enabled"])
+
+    def test_purge_log_keeps_api_response_for_3_days(self):
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "edge_purge.jsonl")
+        old = os.environ.get("BEYBLADE_CF_API_TOKEN")
+        os.environ["BEYBLADE_CF_API_TOKEN"] = "test-token"
+        captured = {}
+
+        class Resp(object):
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"success": true, "errors": [], "result": {"id": "zone"}}'
+
+        def fake_urlopen(request, timeout=20):
+            captured["auth"] = request.get_header("Authorization")
+            return Resp()
+
+        try:
+            result = purge_edge_cache(urlopen=fake_urlopen, log_path=path, now=lambda: 1_700_000_000)
+        finally:
+            if old is None:
+                os.environ.pop("BEYBLADE_CF_API_TOKEN", None)
+            else:
+                os.environ["BEYBLADE_CF_API_TOKEN"] = old
+        self.assertTrue(result["cloudflare"])
+        with open(path, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["http"], 200)
+        self.assertTrue(rows[0]["response"]["success"])
+        self.assertEqual(rows[0]["at"], "2023-11-15T06:13:20")
+        self.assertNotIn("test-token", json.dumps(rows[0]))
+        stale_at = "2023-11-11T06:13:20"
+        fresh_at = "2023-11-13T06:13:20"
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"at": stale_at, "ok": True}) + "\n")
+            fh.write(json.dumps({"at": fresh_at, "ok": True}) + "\n")
+        kept = prune_edge_purge_log(path=path, now=lambda: 1_700_000_000)
+        self.assertEqual(kept, 1)
+        with open(path, encoding="utf-8") as fh:
+            left = [json.loads(line) for line in fh if line.strip()]
+        self.assertEqual(left[0]["at"], fresh_at)
 
     def test_purge_edge_cache_posts_html_tag_and_drops_origin_cache(self):
         cached_bytes("home", lambda: b"stale", ttl=30, now=lambda: 0)
@@ -2410,6 +2487,8 @@ class NotifyHistoryHtmlTests(unittest.TestCase):
         self.assertIn("filter-store-label", page)
         self.assertIn(">Store</p>", page)
         self.assertIn(">Model</p>", page)
+        self.assertNotIn("history-dates", page)
+        self.assertNotIn(">Date</p>", page)
 
 
 class ListingDataDirTests(unittest.TestCase):
@@ -2482,6 +2561,292 @@ class ProductImageHtmlTests(unittest.TestCase):
         )
         self.assertNotIn("onerror", html)
 
+
+
+class ModelGridTests(unittest.TestCase):
+    def test_listing_model_code_normalizes_and_parses(self):
+        self.assertEqual(listing_model_code({"model": "bx01"}), "BX-01")
+        self.assertEqual(listing_model_code({"title": "Wizard CX-04"}), "CX-04")
+        self.assertEqual(listing_model_code({"title": "no code here"}), "")
+        self.assertEqual(
+            listing_model_code(
+                {"model": "BX-00", "title": "BX-00 BXG-47 烈風天馬3-70A"}
+            ),
+            "BXG-47",
+        )
+        self.assertEqual(
+            listing_model_code(
+                {"model": "", "title": "DMM 一番賞 Vol.2 G賞"}
+            ),
+            "KUJI-DMM-V2-G",
+        )
+        self.assertEqual(
+            listing_model_code({"model": "BXA01", "title": "壽司郎"}),
+            "BXA-01",
+        )
+        self.assertEqual(
+            listing_model_code(
+                {"model": "BX-00", "title": "BX-00 美國隊長 4-70GB & 紅浩克 1-80R"}
+            ),
+            "BXA-03",
+        )
+        self.assertEqual(listing_model_code({"title": "BXA-02"}), "BXG-25")
+
+    def test_group_merges_same_model_in_alpha_order(self):
+        groups = group_listings_by_model(
+            [
+                {"model": "UX-01", "sku": "a", "shop_id": "s1", "title": "Later"},
+                {"model": "BX-02", "sku": "b", "shop_id": "s1", "title": "First"},
+                {"model": "BX-02", "sku": "c", "shop_id": "s2", "title": "First again"},
+            ]
+        )
+        self.assertEqual([group["model"] for group in groups], ["BX-02", "UX-01"])
+        self.assertEqual(len(groups[0]["items"]), 2)
+
+    def test_group_keeps_skus_without_a_model(self):
+        groups = group_listings_by_model(
+            [
+                {"sku": "1", "shop_id": "a", "title": "Zebra part"},
+                {"sku": "2", "shop_id": "a", "title": "Apple part"},
+            ]
+        )
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(groups[0]["model"], "")
+        self.assertEqual(groups[0]["items"][0]["title"], "Apple part")
+        self.assertEqual(groups[1]["items"][0]["title"], "Zebra part")
+
+    def test_models_page_merges_stock_and_uses_cheapest_notify_image(self):
+        page = render_models_html(
+            [
+                {
+                    "sku": "1",
+                    "shop_id": "h1",
+                    "shop_label": "ShopA",
+                    "title": "BX-01 Dran Sword",
+                    "model": "BX-01",
+                    "tag": "BX",
+                    "price": "200",
+                    "url": "https://a.example/1",
+                    "status": "in_stock",
+                    "image": "https://cdn.example/expensive.jpg",
+                    "image_path": "images/h1/1.jpg",
+                },
+                {
+                    "sku": "2",
+                    "shop_id": "h2",
+                    "shop_label": "ShopB",
+                    "title": "BX-01 Dran Sword",
+                    "model": "BX-01",
+                    "tag": "BX",
+                    "price": "120",
+                    "url": "https://b.example/2",
+                    "status": "in_stock",
+                    "image": "https://cdn.example/cheap.jpg",
+                },
+                {
+                    "sku": "3",
+                    "shop_id": "h1",
+                    "shop_label": "ShopA",
+                    "title": "UX-10 sold out",
+                    "model": "UX-10",
+                    "tag": "UX",
+                    "price": "90",
+                    "status": "out_of_stock",
+                    "status_label": "缺貨",
+                    "image": "https://cdn.example/out.jpg",
+                },
+                {
+                    "sku": "6",
+                    "shop_id": "h3",
+                    "shop_label": "ShopC",
+                    "title": "BX-01 Dran Sword old",
+                    "model": "BX-01",
+                    "tag": "BX",
+                    "price": "50",
+                    "url": "https://c.example/6",
+                    "status": "out_of_stock",
+                    "status_label": "缺貨",
+                    "image": "https://cdn.example/old.jpg",
+                },
+                {
+                    "sku": "4",
+                    "shop_id": "h1",
+                    "shop_label": "ShopA",
+                    "title": "Mystery blade",
+                    "price": "50",
+                    "url": "https://a.example/4",
+                    "status": "in_stock",
+                    "image": "https://cdn.example/mystery.jpg",
+                },
+                {
+                    "sku": "5",
+                    "shop_id": "h1",
+                    "shop_label": "ShopA",
+                    "title": "Another mystery",
+                    "price": "40",
+                    "url": "https://a.example/5",
+                    "status": "in_stock",
+                },
+            ]
+        )
+        self.assertEqual(page.count("<article class='catalog-card product-card'"), 4)
+        button = page.split("<button type='button' class='catalog-card__hit'", 1)[1].split("</button>", 1)[0]
+        self.assertIn("src='https://cdn.example/cheap.jpg'", button)
+        self.assertNotIn("expensive.jpg", button)
+        self.assertNotIn("old.jpg", button)
+        self.assertIn("out.jpg", page)
+        self.assertIn("https://b.example/2", page)
+        self.assertIn("https://c.example/6", page)
+        self.assertNotIn("2 間店", page)
+        self.assertNotIn("最低 HK$", page)
+        self.assertIn("HK$120 – HK$200", button)
+        self.assertIn(">有貨<", button)
+        self.assertNotIn("缺貨", button)
+        marker = "<h2 class='catalog-card__name'>UX-10 sold out</h2>"
+        start = page.rfind("<article class='catalog-card product-card'", 0, page.index(marker))
+        sold = page[start:page.find("</article>", start)]
+        self.assertIn("缺貨", sold)
+        self.assertIn("HK$90", sold)
+        self.assertIn('href="/models?stock=in"', page)
+        self.assertIn('href="/models?stock=out"', page)
+        self.assertIn("有貨 3", page)
+        self.assertIn("缺貨 2", page)
+        self.assertIn("class='stock-out'", page)
+        self.assertIn("class='stock-in'", page)
+        self.assertNotIn("catalog-card__shops", page)
+        self.assertNotIn("ShopA", button)
+        self.assertNotIn("ShopB", button)
+        self.assertIn("ShopA", page)
+        self.assertIn("ShopB", page)
+        self.assertIn('id="model-modal"', page)
+        self.assertIn("repeat(3,minmax(0,1fr))", page)
+        self.assertIn("repeat(6,minmax(0,1fr))", page)
+        self.assertIn("repeat(8,minmax(0,1fr))", page)
+        self.assertIn("object-fit:cover", page)
+        self.assertIn("BX-01", page)
+        self.assertIn("Mystery blade", page)
+        self.assertIn("Another mystery", page)
+        self.assertIn("現貨圖庫", page)
+        self.assertIn('href="/models?tag=BX"', page)
+
+    def test_models_tag_filter_keeps_matching_groups(self):
+        items = [
+            {
+                "sku": "cx",
+                "shop_id": "h1",
+                "shop_label": "ShopA",
+                "title": "CX-04 Wizard",
+                "model": "CX-04",
+                "price": "80",
+                "url": "https://a.example/cx",
+                "status": "in_stock",
+                "image": "https://cdn.example/cx.jpg",
+            },
+            {
+                "sku": "bx",
+                "shop_id": "h1",
+                "shop_label": "ShopA",
+                "title": "BX-01 Dran",
+                "model": "BX-01",
+                "price": "90",
+                "url": "https://a.example/bx",
+                "status": "in_stock",
+                "image": "https://cdn.example/bx.jpg",
+            },
+        ]
+        page = render_models_html(items, tag_filter="CX")
+        self.assertIn("CX-04", page)
+        self.assertIn("https://cdn.example/cx.jpg", page)
+        self.assertNotIn("BX-01", page)
+        self.assertNotIn("bx.jpg", page)
+        self.assertIn('class="filter on" href="/models?tag=CX"', page)
+        self.assertIn("CX [1]", page)
+        self.assertIn("BX [1]", page)
+        self.assertIn('href="/models?stock=in&amp;tag=CX"', page)
+
+    def test_models_stock_filter_keeps_matching_offers(self):
+        items = [
+            {
+                "sku": "1",
+                "shop_id": "h1",
+                "shop_label": "ShopA",
+                "title": "BX-01 Dran Sword",
+                "model": "BX-01",
+                "price": "200",
+                "url": "https://a.example/1",
+                "status": "in_stock",
+                "image": "https://cdn.example/in.jpg",
+            },
+            {
+                "sku": "2",
+                "shop_id": "h2",
+                "shop_label": "ShopB",
+                "title": "BX-01 Dran Sword",
+                "model": "BX-01",
+                "price": "50",
+                "url": "https://b.example/2",
+                "status": "out_of_stock",
+                "status_label": "缺貨",
+                "image": "https://cdn.example/out.jpg",
+            },
+            {
+                "sku": "3",
+                "shop_id": "h1",
+                "shop_label": "ShopA",
+                "title": "UX-10 sold out",
+                "model": "UX-10",
+                "price": "90",
+                "status": "out_of_stock",
+                "image": "https://cdn.example/ux.jpg",
+            },
+        ]
+        instock = render_models_html(items, stock_filter="in_stock")
+        self.assertEqual(instock.count("<article class='catalog-card product-card'"), 1)
+        self.assertIn("https://a.example/1", instock)
+        self.assertNotIn("https://b.example/2", instock)
+        self.assertNotIn("UX-10", instock)
+        self.assertIn('class="filter on" href="/models?stock=in"', instock)
+        self.assertIn('href="/models?stock=in&amp;tag=BX"', instock)
+        self.assertIn("HK$200", instock)
+        self.assertNotIn("HK$50", instock)
+        soldout = render_models_html(items, stock_filter="out_of_stock")
+        self.assertEqual(soldout.count("<article class='catalog-card product-card'"), 2)
+        self.assertIn("UX-10", soldout)
+        self.assertIn("https://b.example/2", soldout)
+        self.assertNotIn("https://a.example/1", soldout)
+        self.assertIn('class="filter on" href="/models?stock=out"', soldout)
+        both = render_models_html(items, tag_filter="UX", stock_filter="out_of_stock")
+        self.assertIn("UX-10", both)
+        self.assertNotIn("BX-01", both)
+        self.assertIn('class="filter on" href="/models?stock=out&amp;tag=UX"', both)
+
+    def test_nav_links_model_grid_and_stock_list_stays_rows(self):
+        nav = site_nav_html()
+        self.assertIn('href="/models">現貨圖庫</a>', nav)
+        self.assertIn('href="/shop/all?stock=in"', nav)
+        page = render_products_html(
+            {"id": "all", "label": "全部"},
+            [
+                {
+                    "sku": "1",
+                    "title": "BX-01 Dran",
+                    "model": "BX-01",
+                    "price": "100",
+                    "url": "https://a.example/1",
+                    "status": "in_stock",
+                    "status_label": "有貨",
+                    "image": "https://cdn.example/a.jpg",
+                }
+            ],
+            stock_filter="in_stock",
+        )
+        self.assertIn("class='sku-row product-card'", page)
+        self.assertNotIn("<div class='model-grid'", page)
+        self.assertNotIn("class='catalog-card product-card'", page)
+
+    def test_sitemap_includes_models_page(self):
+        xml = sitemap_xml({"sources": []})
+        self.assertIn("https://hkbeybladex.com/models", xml)
 
 
 if __name__ == "__main__":

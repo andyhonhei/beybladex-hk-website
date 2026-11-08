@@ -48,6 +48,7 @@ from site_data import (
     is_preview_crawler,
     load_config,
     load_notify_history,
+    prune_edge_purge_log,
     load_shop_products_for_shop_id,
     parse_go_path,
     run_web_notify_test,
@@ -63,6 +64,7 @@ from site_pages import (
     render_admin_login_html,
     render_coffee_html,
     render_history_html,
+    render_models_html,
     render_notify_test_html,
     render_og_test_html,
     render_privacy_html,
@@ -409,6 +411,28 @@ def start_status_server():
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if parsed.path == "/models":
+                tag_filter = tag_filter_from_query(parsed.query)
+                stock_filter = stock_filter_from_query(parsed.query)
+                cache_key = parsed.path + "?" + parsed.query
+
+                def _models_page():
+                    return render_models_html(
+                        load_shop_products_for_shop_id("all"),
+                        tag_filter=tag_filter,
+                        stock_filter=stock_filter,
+                    ).encode("utf-8")
+
+                body = cached_bytes(cache_key, _models_page)
+                robots = None if not tag_filter and not stock_filter else "noindex, nofollow"
+                self._bytes(
+                    200,
+                    "text/html; charset=utf-8",
+                    body,
+                    cache=HTML_CACHE_CONTROL,
+                    robots=robots,
+                )
+                return
             if parsed.path.startswith("/shop/"):
                 shop_id = urllib.parse.unquote(parsed.path[len("/shop/"):].strip("/"))
                 meta = shop_page_meta(shop_id)
@@ -628,5 +652,13 @@ if __name__ == "__main__":
         default=DEFAULT_CONFIG_PATH,
         help="Path to watch_config.json (default: %(default)s)",
     )
+    parser.add_argument(
+        "--prune-edge-purge-log",
+        action="store_true",
+        help="Drop Cloudflare purge log rows older than 3 days",
+    )
     args = parser.parse_args()
+    if args.prune_edge_purge_log:
+        print("edge purge log kept %s" % prune_edge_purge_log(), flush=True)
+        sys.exit(0)
     sys.exit(serve_forever(config_path=args.config))

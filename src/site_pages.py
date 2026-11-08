@@ -54,12 +54,17 @@ from site_data import (
     filter_shops_by_notify_src,
     filter_shop_products,
     find_source_by_id,
+    group_listings_by_model,
+    group_tag_key,
+    listing_price_value,
+    listing_rank,
     go_canonical_url,
     go_path,
     home_seo_description,
     history_href,
     history_query_dates,
     history_row_for_display,
+    item_bundle_lines,
     home_href,
     load_index_notifies,
     load_notify_history,
@@ -224,15 +229,7 @@ letter-spacing:.14em;text-transform:uppercase;color:var(--ink)}
 .history-filters .filter-store-label{margin:0 0 4px}
 .history-filters .filters,.history-filters .shop-chips{margin:0;gap:6px}
 .history-filters .filters a{padding:6px 10px}
-.history-filters .history-dates{margin:0;gap:8px}
 .history-filters .filter-combo{margin:0;max-width:200px;min-width:148px}
-.history-dates{display:flex;flex-wrap:nowrap;gap:8px;align-items:center;margin:0 0 16px;color:var(--ink)}
-.history-dates label{display:flex;flex-direction:row;align-items:center;gap:6px;font-family:"IBM Plex Mono",monospace;
-font-size:11px;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;cursor:pointer;min-height:44px}
-.history-dates input[type=date]{padding:10px 8px 10px 12px;border:1px solid var(--ink);background:#fff;color:var(--ink);
-font-family:"IBM Plex Mono",monospace;font-size:16px;letter-spacing:0;text-transform:none;min-height:44px;min-width:158px;
-cursor:pointer}
-.history-dates input[type=date]::-webkit-calendar-picker-indicator{cursor:pointer;width:28px;height:28px;padding:6px;margin:0}
 .filter-combo{position:relative;max-width:320px;margin:0 0 16px;color:var(--ink)}
 .filter-combo.shop-chips,.filter-combo.filters{display:block;flex-wrap:unset;gap:0;margin:0}
 .filter-combo-field{position:relative}
@@ -258,6 +255,9 @@ margin:16px 0 4px;padding:4px 0;border-bottom:1px solid #d8d8f0}
 .stock-in{color:var(--blue)}
 .notify-row{display:flex;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid #d8d8f0}
 .notify-row:last-child{border-bottom:0}
+.bundle-items{margin:0 0 6px;padding:0;list-style:none;font-size:13px;line-height:1.45}
+.bundle-items li{margin:0}
+.bundle-price{font-family:"IBM Plex Mono",monospace}
 .skip-btn{flex:0 0 auto;min-height:44px;min-width:64px;background:transparent;border:1px solid var(--ink);padding:8px 12px;cursor:pointer;font-size:13px}
 .toolbar{margin:0 0 16px}
 .install-hint{display:none;position:fixed;left:0;right:0;bottom:0;z-index:30;
@@ -303,9 +303,6 @@ nav a.nav-btn,nav button{padding:8px 8px;letter-spacing:.06em;white-space:nowrap
 th:nth-child(3),td:nth-child(3),th:nth-child(6),td:nth-child(6){display:none}
 .history-filters{gap:8px}
 .history-filters .filter-combo{max-width:100%;min-width:0;flex:1 1 140px}
-.history-filters .history-dates{flex:1 1 100%;min-width:0;flex-wrap:wrap}
-.history-dates label{flex:1 1 160px}
-.history-dates input[type=date]{flex:1;width:100%;min-width:0}
 th,td{font-size:12px;padding:10px 6px}
 .slash{opacity:.18;width:64px}
 h1.page-title{margin:24px 0 16px}
@@ -314,6 +311,51 @@ h1.page-title{margin:24px 0 16px}
 .name{font-size:14px}
 .skip-btn{min-height:40px;padding:6px 10px}
 }
+.model-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:4px 0 20px}
+.model-grid .product-card{display:flex;flex-direction:column;align-items:stretch;gap:0;padding:0;border:0;border-bottom:0;background:transparent}
+.model-grid .catalog-card{position:relative;background:#fff;color:var(--ink);border:1px solid #e4e4f4;border-radius:8px;overflow:hidden;min-width:0;
+transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}
+.model-grid .catalog-card:hover{transform:translateY(-2px);border-color:var(--blue);box-shadow:0 8px 18px rgba(26,26,255,.12)}
+.model-grid .catalog-card__hit{display:flex;flex-direction:column;width:100%;margin:0;padding:0;border:0;background:transparent;
+color:inherit;font:inherit;text-align:inherit;cursor:pointer}
+.model-grid .catalog-card__image{aspect-ratio:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;
+background:radial-gradient(circle at 50% 40%,#fff 0%,#f4f6fb 58%,#e7edf6 100%)}
+.model-grid .catalog-card__image img{width:100%;height:100%;object-fit:cover;display:block}
+.model-grid .catalog-card__placeholder{font-family:"IBM Plex Mono",monospace;font-size:13px;color:#8a8aaa}
+.model-grid .catalog-card__badge{position:absolute;top:6px;right:6px;z-index:1;background:var(--blue);color:#fff;
+font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:.06em;padding:2px 5px;border-radius:999px}
+.model-grid .catalog-card__badge--out{background:#6a6a88}
+.model-grid .catalog-card__badge .stock-in,.model-grid .catalog-card__badge .stock-out{color:#fff}
+.model-grid .catalog-card__body{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 8px 8px;text-align:center}
+.model-grid .catalog-card__id{font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.06em;color:#6a6a88}
+.model-grid .catalog-card__name{margin:0;font-family:Inter,system-ui,sans-serif;font-size:11px;font-weight:600;line-height:1.3;color:#0a0a2a;
+display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}
+.model-grid .catalog-card__subtitle{margin:0;font-family:"IBM Plex Mono",monospace;font-size:10px;line-height:1.3;color:var(--blue)}
+.model-offer .stock-in{color:var(--blue)}
+.model-offer .stock-out{color:#888}
+.model-offer-list[hidden]{display:none}
+.model-offer{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #ececf4}
+.model-offer:last-child{border-bottom:0}
+.model-offer .thumb,.model-offer .thumb-empty{width:52px;height:52px;flex:0 0 52px;object-fit:cover;background:#f4f6fb}
+.model-offer .name{font-size:13px;line-height:1.35;margin:0 0 4px}
+.model-offer .name a{color:var(--ink);text-decoration:none}
+.model-offer .sub{font-size:11px;color:#555}
+body.model-open{overflow:hidden}
+.model-modal[hidden]{display:none}
+.model-modal{position:fixed;inset:0;z-index:40;display:flex;align-items:flex-end;justify-content:center}
+.model-modal__backdrop{position:absolute;inset:0;border:0;padding:0;background:rgba(10,10,42,.55);cursor:pointer}
+.model-modal__panel{position:relative;z-index:1;width:100%;max-height:min(82vh,720px);overflow:auto;background:#fff;color:var(--ink);
+border-radius:12px 12px 0 0;padding:14px 16px 20px;box-shadow:0 -12px 32px rgba(10,10,42,.2)}
+.model-modal__head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 4px}
+.model-modal__title{margin:0;font-family:"IBM Plex Mono",monospace;font-size:14px;letter-spacing:.04em}
+.model-modal__close{width:32px;height:32px;border:0;background:transparent;color:var(--ink);font-size:24px;line-height:1;cursor:pointer}
+@media(min-width:700px){
+.model-modal{align-items:center;padding:24px}
+.model-modal__panel{width:min(520px,100%);border-radius:12px}
+}
+@media(min-width:640px){.model-grid{grid-template-columns:repeat(5,minmax(0,1fr))}}
+@media(min-width:960px){.model-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}
+@media(min-width:1200px){.model-grid{grid-template-columns:repeat(8,minmax(0,1fr))}}
 """.strip()
 
 
@@ -592,6 +634,7 @@ def sitemap_xml(cfg=None):
         "/watch",
         OG_HOME_PATH,
         "/shops",
+        "/models",
         "/catalog",
         "/parts",
         "/collection",
@@ -1221,36 +1264,6 @@ def notify_src_chips_html(src="", home=False, shop_id="", model="", start="", en
     return filter_options_html(items, combo_label="" if home else "來源")
 
 
-def history_date_filter_html(start, end, shop_id="", model="", src=""):
-    hidden = []
-    if shop_id:
-        hidden.append(
-            '<input type="hidden" name="shop" value="%s">' % html.escape(str(shop_id), quote=True)
-        )
-    if model:
-        hidden.append(
-            '<input type="hidden" name="model" value="%s">' % html.escape(str(model), quote=True)
-        )
-    if normalize_notify_src(src) == NOTIFY_SRC_AMAZON:
-        hidden.append(
-            '<input type="hidden" name="src" value="%s">' % html.escape(NOTIFY_SRC_AMAZON, quote=True)
-        )
-    return (
-        '<div class="filter-store">'
-        '<p class="filter-store-label">Date</p>'
-        '<form class="history-dates" method="get" action="/history">'
-        "%s"
-        '<label>From <input type="date" name="from" value="%s"></label>'
-        '<label>To <input type="date" name="to" value="%s"></label>'
-        '<noscript><button type="submit">Apply</button></noscript>'
-        "</form></div>"
-    ) % (
-        "".join(hidden),
-        html.escape(str(start)[:10], quote=True),
-        html.escape(str(end)[:10], quote=True),
-    )
-
-
 def history_filter_chips_html(shops, models, shop_id="", model="", start="", end="", src=""):
     src = normalize_notify_src(src)
     shop_id = notify_src_shop_id(shop_id, src)
@@ -1277,9 +1290,8 @@ def history_filter_chips_html(shops, models, shop_id="", model="", start="", end
                 str(item) == model,
             )
         )
-    return '<div class="history-filters">%s%s%s%s</div>' % (
+    return '<div class="history-filters">%s%s%s</div>' % (
         notify_src_chips_html(src=src, shop_id=shop_id, model=model, start=start, end=end),
-        history_date_filter_html(start, end, shop_id, model, src=src),
         filter_options_html(shop_items, combo_label="Store"),
         filter_options_html(model_items, combo_label="Model", force_combo=True),
     )
@@ -1407,6 +1419,315 @@ def product_card_html(item, shop_id="", extra=""):
     )
 
 
+def models_href(tag=None, stock=None):
+    query = []
+    if stock == "in_stock":
+        query.append(("stock", "in"))
+    elif stock == "out_of_stock":
+        query.append(("stock", "out"))
+    if tag in ("CX", "BX", "UX", "other"):
+        query.append(("tag", tag))
+    if query:
+        return "/models?" + urllib.parse.urlencode(query)
+    return "/models"
+
+
+def notify_card_image_html(item, alt, placeholder):
+    rel = str((item or {}).get("image_path") or "").replace("\\", "/")
+    remote = product_image_url(item)
+    cached = ""
+    if rel.startswith("images/") and ".." not in rel:
+        cached = cdn_image_url("/" + rel)
+    src = remote or cached
+    label = html.escape((placeholder or "?")[:2])
+    if not src:
+        return "<span class='catalog-card__placeholder'>%s</span>" % label
+    hide = (
+        "this.onerror=null;this.style.display='none';"
+        "var ph=this.parentNode.querySelector('.catalog-card__placeholder');"
+        "if(ph)ph.hidden=false;"
+    )
+    if remote and cached:
+        extra = " onerror=\"this.onerror=function(){%s};this.src='%s'\"" % (
+            hide,
+            html.escape(cached, quote=True),
+        )
+    else:
+        extra = ' onerror="%s"' % hide
+    return (
+        "<img src='%s' alt='%s' loading='lazy' decoding='async'%s>"
+        "<span class='catalog-card__placeholder' hidden>%s</span>"
+        % (
+            html.escape(src, quote=True),
+            html.escape(alt, quote=True),
+            extra,
+            label,
+        )
+    )
+
+
+def format_listing_price(value):
+    if value is None:
+        return ""
+    if abs(value - round(value)) < 0.001:
+        return "HK$%d" % int(round(value))
+    return "HK$%.2f" % value
+
+
+def listing_price_values(items):
+    values = []
+    for item in items or []:
+        value = listing_price_value(item)
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def listing_price_label(items):
+    values = listing_price_values(items)
+    if not values:
+        return ""
+    low, high = min(values), max(values)
+    if len(items or []) > 1 and high - low >= 0.001:
+        return "%s – %s" % (format_listing_price(low), format_listing_price(high))
+    return format_listing_price(values[0] if len(values) == 1 else low)
+
+
+def current_price_items(items):
+    items = list(items or [])
+    in_stock = [item for item in items if product_stock_key(item) == "in_stock"]
+    return in_stock or items
+
+
+def group_stock_key(items):
+    keys = {product_stock_key(item) for item in items or []}
+    if "in_stock" in keys:
+        return "in_stock"
+    if "out_of_stock" in keys:
+        return "out_of_stock"
+    return "unknown"
+
+
+def offer_status_html(item):
+    stock = product_stock_key(item)
+    label = str((item or {}).get("status_label") or status_text(stock) or "")
+    if not label:
+        return ""
+    css = {"in_stock": "stock-in", "out_of_stock": "stock-out"}.get(stock, "")
+    if css:
+        return "<span class='%s'>%s</span>" % (css, html.escape(label))
+    return html.escape(label)
+
+
+def model_offer_html(item):
+    item = item or {}
+    title = str(item.get("title") or item.get("sku") or "")
+    url = str(item.get("url") or "").strip()
+    name = html.escape(title)
+    if url:
+        name = "<a href='%s' target='_blank' rel='noopener'>%s</a>" % (
+            html.escape(url, quote=True),
+            name,
+        )
+    shop = str(item.get("shop_label") or item.get("shop_id") or "").strip()
+    price = format_listing_price(listing_price_value(item))
+    bits = [html.escape(part) for part in (shop, price) if part]
+    status = offer_status_html(item)
+    if status:
+        bits.append(status)
+    return (
+        "<article class='model-offer'>%s<div class='meta'><div class='name'>%s</div>"
+        "<div class='sub'>%s</div></div></article>"
+        % (product_thumb_html(item), name, " · ".join(bits))
+    )
+
+
+def model_grid_card_html(group):
+    group = group or {}
+    items = sorted(list(group.get("items") or []), key=listing_rank)
+    if not items:
+        return ""
+    primary = items[0]
+    model = str(group.get("model") or "")
+    title = str(primary.get("title") or model or primary.get("sku") or "")
+    tag = group_tag_key(group)
+    priced = current_price_items(items)
+    price_label = listing_price_label(priced)
+    sku = str(primary.get("sku") or "")
+    shop_id = str(primary.get("shop_id") or "")
+    brand = str(primary.get("shop_label") or shop_id)
+    code = "<code class='catalog-card__id'>%s</code>" % html.escape(model) if model else ""
+    range_html = (
+        "<p class='catalog-card__subtitle'>%s</p>" % html.escape(price_label) if price_label else ""
+    )
+    placeholder = model or title or "?"
+    image_html = notify_card_image_html(primary, title, placeholder)
+    body = (
+        "<div class='catalog-card__body'>%s<h2 class='catalog-card__name'>%s</h2>%s</div>"
+        % (code, html.escape(title), range_html)
+    )
+    stock = group_stock_key(items)
+    stock_label = status_text(stock)
+    stock_class = {"in_stock": "stock-in", "out_of_stock": "stock-out"}.get(stock, "")
+    badge_class = "catalog-card__badge catalog-card__badge--out" if stock == "out_of_stock" else "catalog-card__badge"
+    media = (
+        "<div class='catalog-card__image'>"
+        "<span class='%s'><span class='%s'>%s</span></span>%s</div>"
+        % (badge_class, stock_class, html.escape(stock_label), image_html)
+    )
+    offers = "\n".join(model_offer_html(item) for item in items)
+    label = model or title
+    return (
+        "<article class='catalog-card product-card' data-shop='%s' data-sku='%s' data-tag='%s'"
+        " data-model='%s' data-name='%s' data-price='%s' data-brand='%s'>"
+        "<button type='button' class='catalog-card__hit' aria-haspopup='dialog' aria-label='%s'>%s%s</button>"
+        "<div class='model-offer-list' hidden>%s</div></article>"
+        % (
+            html.escape(shop_id, quote=True),
+            html.escape(sku, quote=True),
+            html.escape(tag, quote=True),
+            html.escape(model, quote=True),
+            html.escape(title, quote=True),
+            html.escape(price_label, quote=True),
+            html.escape(brand, quote=True),
+            html.escape(label, quote=True),
+            media,
+            body,
+            offers,
+        )
+    )
+
+
+def model_modal_html():
+    return (
+        '<div class="model-modal" id="model-modal" hidden>'
+        '<button type="button" class="model-modal__backdrop" data-model-close aria-label="關閉"></button>'
+        '<div class="model-modal__panel" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">'
+        '<div class="model-modal__head"><h2 class="model-modal__title" id="model-modal-title"></h2>'
+        '<button type="button" class="model-modal__close" data-model-close aria-label="關閉">×</button></div>'
+        '<div class="model-modal__body"></div></div></div>'
+        "<script>(function(){"
+        'var modal=document.getElementById("model-modal");'
+        "if(!modal)return;"
+        'var body=modal.querySelector(".model-modal__body");'
+        'var title=modal.querySelector(".model-modal__title");'
+        "var last=null;"
+        "function close(){modal.hidden=true;document.body.classList.remove('model-open');if(last)last.focus();}"
+        "function open(card,trigger){"
+        'var src=card.querySelector(".model-offer-list");'
+        "if(!src||!body||!title)return;"
+        "body.innerHTML=src.innerHTML;"
+        'title.textContent=card.getAttribute("data-model")||card.getAttribute("data-name")||"";'
+        "modal.hidden=false;document.body.classList.add('model-open');last=trigger;"
+        'var btn=modal.querySelector(".model-modal__close");if(btn)btn.focus();'
+        "}"
+        'document.addEventListener("click",function(e){'
+        'var hit=e.target.closest&&e.target.closest(".catalog-card__hit");'
+        "if(hit){var card=hit.closest('.catalog-card');if(card){e.preventDefault();open(card,hit);}return;}"
+        'if(e.target.closest&&e.target.closest("[data-model-close]"))close();'
+        "});"
+        'document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!modal.hidden)close();});'
+        "})();</script>"
+    )
+
+
+def render_models_html(items, tag_filter="", stock_filter=""):
+    items = list(items or [])
+    groups = group_listings_by_model(items)
+    tag_counts = {"CX": 0, "BX": 0, "UX": 0, "other": 0}
+    in_count = 0
+    out_count = 0
+    for group in groups:
+        tag = group_tag_key(group)
+        if tag in tag_counts:
+            tag_counts[tag] += 1
+        keys = {product_stock_key(item) for item in group.get("items") or []}
+        if "in_stock" in keys:
+            in_count += 1
+        if "out_of_stock" in keys:
+            out_count += 1
+    filtered = items
+    if stock_filter == "in_stock":
+        filtered = [item for item in items if product_stock_key(item) == "in_stock"]
+    elif stock_filter == "out_of_stock":
+        filtered = [item for item in items if product_stock_key(item) == "out_of_stock"]
+    shown = group_listings_by_model(filtered)
+    if tag_filter:
+        shown = [group for group in shown if group_tag_key(group) == tag_filter]
+    rendered = [model_grid_card_html(group) for group in shown]
+    rendered = [card for card in rendered if card]
+    if rendered:
+        cards = "<div class='model-grid'>\n%s\n</div>" % "\n".join(rendered)
+    else:
+        cards = "<p>暫時沒有型號</p>"
+
+    def stock_link(kind, text):
+        on = " on" if (kind or "") == (stock_filter or "") else ""
+        return '<a class="filter%s" href="%s">%s</a>' % (
+            on,
+            html.escape(models_href(tag_filter or None, kind or None), quote=True),
+            text,
+        )
+
+    def tag_link(tag, text):
+        on = " on" if (tag or "") == (tag_filter or "") else ""
+        return '<a class="filter%s" href="%s">%s</a>' % (
+            on,
+            html.escape(models_href(tag or None, stock_filter or None), quote=True),
+            text,
+        )
+
+    filters = (
+        '<p class="filters">%s %s %s</p>'
+        '<p class="filters">%s %s %s %s %s</p>'
+        % (
+            stock_link("", "全部 %s" % len(groups)),
+            stock_link("in_stock", "有貨 %s" % in_count),
+            stock_link("out_of_stock", "缺貨 %s" % out_count),
+            tag_link("", "All"),
+            tag_link("CX", "CX [%s]" % tag_counts["CX"]),
+            tag_link("BX", "BX [%s]" % tag_counts["BX"]),
+            tag_link("UX", "UX [%s]" % tag_counts["UX"]),
+            tag_link("other", "other [%s]" % tag_counts["other"]),
+        )
+    )
+    title = "現貨圖庫 · %s" % SITE_BRAND
+    desc = "香港爆旋陀螺現貨，按型號列出，圖片與到貨通知相同。"
+    return """<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+%s
+<style>
+%s
+</style>
+</head>
+<body>
+<div class="slash" aria-hidden="true"></div>
+<div class="wrap">
+%s
+<h1 class="page-title">現貨圖庫</h1>
+<section class="panel" data-item-list-id="models" data-item-list-name="現貨圖庫">
+%s
+<p class="kicker">%s models</p>
+%s
+%s
+</section>
+</div>
+%s
+</body>
+</html>
+""" % (
+        page_seo_head(title, desc, "/models", indexable=not tag_filter and not stock_filter),
+        page_theme_css(),
+        site_nav_html(),
+        filters,
+        html.escape(str(len(shown))),
+        cards,
+        model_modal_html(),
+        install_hint_block(),
+    )
+
+
 def threads_subscribe_desc_html(shops_href="/shops"):
     return (
         "香港爆旋陀螺到貨通知。"
@@ -1473,14 +1794,43 @@ def render_go_bounce_html(target, shop_id, sku, page_url=None):
 <html lang="zh-Hant" prefix="og: https://ogp.me/ns#">
 <head>
 %s
+<link rel="preconnect" href="https://www.googletagmanager.com">
+<link rel="preconnect" href="https://www.google-analytics.com">
+<style>
+body{margin:0;min-height:100vh;background:#1a1aff;color:#fff;font-family:Inter,system-ui,sans-serif}
+.slash{position:fixed;right:0;top:12%%;width:120px;height:70%%;pointer-events:none;
+background:repeating-linear-gradient(-32deg,transparent,transparent 10px,#fff 10px,#fff 11px);opacity:.35}
+.go-loading{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;position:relative;z-index:1}
+.go-loading svg{width:56px;height:56px}
+.go-loading p{margin:0;font-family:"IBM Plex Mono",monospace;font-size:13px;letter-spacing:.12em;text-transform:uppercase}
+.go-loading a{color:#fff}
+</style>
 </head>
 <body>
+<div class="slash" aria-hidden="true"></div>
+<div class="go-loading">
+<svg viewBox="0 0 56 56" aria-hidden="true">
+<circle cx="28" cy="28" r="18" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="4"/>
+<circle cx="28" cy="28" r="18" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-dasharray="28 86">
+<animateTransform attributeName="transform" type="rotate" from="0 28 28" to="360 28 28" dur="0.7s" repeatCount="indefinite"/>
+</circle>
+</svg>
 <p><a href="%s">前往商店</a></p>
+</div>
 <script>
 (function(){
   var dest=%s;
-  if(!dest)return;
-  location.replace(dest);
+  var gone=false;
+  function go(){
+    if(gone||!dest)return;
+    gone=true;
+    location.replace(dest);
+  }
+  if(window.gtag){
+    gtag('config','G-19VVZP9R25',{transport_type:'beacon',send_page_view:false});
+    gtag('event','page_view',{transport_type:'beacon'});
+  }
+  setTimeout(go, 500);
 })();
 </script>
 </body>
@@ -1670,17 +2020,6 @@ def filter_combo_script():
         "document.addEventListener('click',function(e){"
         "if(!e.target.closest || !e.target.closest('.filter-combo')) closeAll();"
         "});"
-        "document.querySelectorAll('form.history-dates').forEach(function(form){"
-        "form.addEventListener('change',function(){form.submit();});"
-        "form.querySelectorAll('label').forEach(function(label){"
-        "var input=label.querySelector('input[type=date]');"
-        "if(!input)return;"
-        "label.addEventListener('click',function(){"
-        "if(typeof input.showPicker!=='function')return;"
-        "try{input.showPicker();}catch(err){}"
-        "});"
-        "});"
-        "});"
         "})();"
         "</script>"
     )
@@ -1765,6 +2104,7 @@ def site_nav_html(subscribe=True):
         '<nav class="nav-drawer-links">'
         '<a href="/shops">店舖現況</a>'
         '<a href="%s">全部現貨</a>'
+        '<a href="/models">現貨圖庫</a>'
         '<a href="/history">最新通知</a>'
         "</nav>"
         '<div class="nav-drawer-subscribe">%s</div>'
@@ -2071,6 +2411,20 @@ def render_notify_test_html():
     )
 
 
+def bundle_items_html(item):
+    rows = []
+    for line in item_bundle_lines(item):
+        name = html.escape(str(line.get("name") or ""))
+        price = str(line.get("price") or "").strip()
+        price_html = (
+            " <span class='bundle-price'>HK$%s</span>" % html.escape(price) if price else ""
+        )
+        rows.append("<li>%s%s</li>" % (name, price_html))
+    if not rows:
+        return ""
+    return "<ul class='bundle-items'>%s</ul>" % "".join(rows)
+
+
 def notify_rows_html(rows, today=None):
     if not rows:
         return "<p>尚未有通知。</p>"
@@ -2112,8 +2466,8 @@ def notify_rows_html(rows, today=None):
         )
         parts.append(
             "<article class='notify-row'>"
-            "%s<div class='meta'><div class='name'>%s</div><div class='sub'>%s</div></div></article>"
-            % (product_thumb_html(item), name, meta)
+            "%s<div class='meta'><div class='name'>%s</div>%s<div class='sub'>%s</div></div></article>"
+            % (product_thumb_html(item), name, bundle_items_html(item), meta)
         )
     return "".join(parts)
 

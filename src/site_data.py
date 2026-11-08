@@ -56,9 +56,9 @@ STATUS_PATH = os.path.join(DATA_DIR, "watch_status.json")
 EVENT_LOG_PATH = os.path.join(DATA_DIR, "watch_events.jsonl")
 NOTIFY_HISTORY_PATH = os.path.join(DATA_DIR, "notify_history.jsonl")
 CONFIG = {}
-DISCORD_INVITE_URL = "https://discord.gg/qpnuMgBv8"
+DISCORD_INVITE_URL = "https://discord.gg/C8Q5gZf3y5"
 TELEGRAM_INVITE_URL = "https://t.me/+mbTPVeGFBalhMjQ9"
-THREADS_PROFILE_URL = "https://www.threads.com/@hkbeybladex_com"
+THREADS_PROFILE_URL = "https://discord.gg/C8Q5gZf3y5"
 THREADS_SUBSCRIBE_DESC = "香港爆旋陀螺到貨通知。Online舖頭 有新品、補貨、缺貨就出帖。非官方。"
 THREADS_SUBSCRIBE_HINT = "Follow 我哋 Threads 之後記得撳右上角訂閱／鐘仔掣，訂閱帖文通知"
 SUBSCRIBE_BUTTON_LABEL = "訂閱通知"
@@ -104,6 +104,8 @@ EDGE_PURGE_SHORT_WINDOW = 20 * 60
 EDGE_PURGE_SHORT_MAX = 10
 EDGE_PURGE_LONG_WINDOW = 4 * 60 * 60
 EDGE_PURGE_LONG_MAX = 20
+EDGE_PURGE_LOG_KEEP_DAYS = 3
+EDGE_PURGE_LOG_NAME = "edge_purge.jsonl"
 GO_CACHE_CONTROL = "public, max-age=300, s-maxage=86400, stale-if-error=604800"
 # Bump when /go preview HTML changes. Telegram caches each full URL.
 GO_LINK_VERSION = "2"
@@ -125,8 +127,12 @@ NOTIFY_SRC_HK = "hk"
 NOTIFY_SRC_AMAZON = "amazon"
 AMAZON_NOTIFY_SHOP_IDS = frozenset({"amazon", "amazon-jp"})
 FILTER_COMBO_THRESHOLD = 7
-NOTIFY_EVENT_LABELS = {"new": "新品", "restock": "補貨", "sold_out": "缺貨"}
-NOTIFY_EVENT_KINDS = ("new", "restock", "sold_out")
+NOTIFY_EVENT_LABELS = {"new": "新品", "restock": "補貨", "sold_out": "缺貨", "price_drop": "降價"}
+NOTIFY_EVENT_KINDS = ("new", "restock", "sold_out", "price_drop")
+BUNDLE_DESC_HEADER = "套裝內容"
+GO_NOTIFY_ALWAYS_SHOPS = frozenset({"aeoncity", "hobbydigi"})
+THREADS_DEFAULT_DAILY_POST_LIMIT = 5
+_threads_io_lock = threading.RLock()
 THREADS_TOPIC_TAG = "爆旋陀螺X"
 THREADS_SUBSCRIBE_ASK = (
     "Thread Follow 之後記得撳右上角鐘仔訂閱帖文，先可以有即時通知！\n"
@@ -148,8 +154,6 @@ DEFAULT_SKIP_PHRASES = (
     "Megalo Maria",
     "Tomica",
     "Hiace",
-    "DMM Kuji Vol",
-    "DMM 一番賞",
     "SANRIO CHARACTERS",
     "Robosen",
     "變形金剛",
@@ -165,10 +169,36 @@ _mysql_probe = {"at": 0, "ok": None}
 _mysql_probe_lock = threading.Lock()
 
 
+def watch_config_overlay_path(path):
+    root, ext = os.path.splitext(path or DEFAULT_CONFIG_PATH)
+    return root + ".local" + ext
+
+
+def merge_watch_config(base, overlay):
+    if not isinstance(base, dict):
+        base = {}
+    if not isinstance(overlay, dict):
+        return base
+    out = dict(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = merge_watch_config(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
 def load_config(path=None):
     path = path or DEFAULT_CONFIG_PATH
     with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+        cfg = json.load(fh)
+    overlay_path = watch_config_overlay_path(path)
+    if os.path.isfile(overlay_path):
+        with open(overlay_path, "r", encoding="utf-8") as fh:
+            overlay = json.load(fh)
+        if isinstance(overlay, dict):
+            cfg = merge_watch_config(cfg, overlay)
+    return cfg
 
 
 def apply_config(cfg):
@@ -451,7 +481,7 @@ def wrap_notify_item_links(items, shop_id="uat", source=None, warm=False, probe=
         sku = str(row.get("sku") or UAT_GO_SKU)
         sid = str(row.get("shop_id") or shop_id or UAT_GO_SHOP)
         hop = go_href(sid, sku, source=source)
-        ready = (not warm) or check(hop)
+        ready = (not warm) or check(hop) or sid in GO_NOTIFY_ALWAYS_SHOPS
         if ready:
             row["link"] = hop
         out.append(row)
@@ -492,23 +522,24 @@ def go_http_result(path, query="", cookie="", remember=False, force_store=False,
         cache_product_image(shop_id, item, prefetch=True)
         target = dict(target)
         target["og_image"] = go_og_image_url(item, shop_id)
-    qs = urllib.parse.parse_qs(query or "")
-    source = str((qs.get("from") or [""])[0] or "").strip().lower()
-    # One document for browsers and preview crawlers. Browsers run
-    # location.replace; crawlers do not, and there is no meta refresh to follow.
-    # Cloudflare caches /go without the User-Agent, so the two cannot differ.
-    bounce = remember or force_store or source in ("discord", "telegram", "macos")
+    # Browsers get the loading hop. Preview crawlers get the SEO card and do not
+    # redirect, so the link preview stays on this page. Cloudflare does not vary
+    # /go on User-Agent, so this response must not be stored at the edge.
+    # pv=2 on notify links is unchanged; Telegram still keys its own preview cache
+    # by the full URL.
+    del remember, force_store
+    crawler = is_preview_crawler(user_agent)
     page_url = go_request_url(path, query)
     from site_pages import render_go_bounce_html, render_go_html
     return {
         "status": 200,
         "html": (
-            render_go_bounce_html(target, shop_id, sku, page_url=page_url)
-            if bounce
-            else render_go_html(target, shop_id, sku, page_url=page_url)
+            render_go_html(target, shop_id, sku, page_url=page_url)
+            if crawler
+            else render_go_bounce_html(target, shop_id, sku, page_url=page_url)
         ),
         "location": target["dest"],
-        "cache": GO_CACHE_CONTROL,
+        "cache": "private, no-store",
     }
 
 
@@ -921,21 +952,391 @@ def load_error_state(path=None):
     return db_state or file_state
 
 
-def product_line_fields(item):
-    text = " ".join(
-        str(item.get(key) or "")
-        for key in ("title", "sku", "name")
+def _money_text(raw):
+    text = re.sub(r"(?i)HKD?\s*\$?\s*", "", _strip_html(raw or "")).replace(",", "").strip()
+    return text.split()[0] if text else ""
+
+
+def _price_number(raw):
+    text = _money_text(raw)
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def format_money_amount(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if number == int(number):
+        return str(int(number))
+    return ("%.2f" % number).rstrip("0").rstrip(".")
+
+
+def price_drop_parts(prev_price, price):
+    old_n = _price_number(prev_price)
+    new_n = _price_number(price)
+    if old_n is None or new_n is None or old_n <= 0 or new_n >= old_n:
+        return None
+    delta = old_n - new_n
+    pct = round(delta / old_n * 100.0, 1)
+    return format_money_amount(delta), ("%g" % pct)
+
+
+def price_value_text(item):
+    item = item or {}
+    price = item.get("price")
+    if not price:
+        return "—"
+    base = "HK$%s" % price
+    parts = price_drop_parts(item.get("prev_price"), price)
+    if not parts:
+        return base
+    amount, pct = parts
+    new_price = format_money_amount(_price_number(price)) or price
+    return "HK$%s → HK$%s（↓ HK$%s / %s%%）" % (
+        item.get("prev_price"),
+        new_price,
+        amount,
+        pct,
     )
+
+
+def notify_kind_label(event, item=None):
+    if event == "new":
+        status = stock_status(item)
+        if status == "in_stock":
+            return "新品有貨"
+        if status == "out_of_stock":
+            return "新品缺貨"
+        return "新品"
+    if event == "restock":
+        return "補貨"
+    if event == "sold_out":
+        return "變為缺貨"
+    if event == "price_drop":
+        return "降價"
+    return "新品"
+
+
+def parse_bundle_description(text):
+    text = str(text or "").strip()
+    if not text.startswith(BUNDLE_DESC_HEADER):
+        return []
+    lines = []
+    for row in text.splitlines()[1:]:
+        row = row.strip()
+        if not row:
+            continue
+        match = re.match(r"^(.*)\s+HK\$(\S+)$", row)
+        if match:
+            lines.append({"name": match.group(1).strip(), "price": match.group(2)})
+        else:
+            lines.append({"name": row, "price": ""})
+    return lines
+
+
+def item_bundle_lines(item):
+    raw = (item or {}).get("bundle")
+    if isinstance(raw, list):
+        lines = [
+            {"name": str(line.get("name") or "").strip(), "price": str(line.get("price") or "").strip()}
+            for line in raw
+            if isinstance(line, dict) and str(line.get("name") or "").strip()
+        ]
+        if lines:
+            return lines
+    return parse_bundle_description((item or {}).get("description"))
+
+
+def bundle_notice_lines(item):
+    lines = []
+    for line in item_bundle_lines(item):
+        name = line.get("name") or ""
+        price = line.get("price") or ""
+        lines.append("%s HK$%s" % (name, price) if price else name)
+    return lines
+
+
+_UMBRELLA_CODE_RE = re.compile(
+    r"(?<![A-Za-z])(BX|CX|UX)-00(?![A-Za-z0-9])",
+    re.I,
+)
+_SPECIFIC_CODE_RE = re.compile(
+    r"(?<![A-Za-z0-9])((BX|CX|UX)[A-Z]?-?\s?\d{2})(?=$|[^A-Za-z0-9]|(?:BX|CX|UX)(?![A-Za-z]))",
+    re.I,
+)
+_PART_CODE_RE = re.compile(
+    r"(?<![A-Za-z0-9])([A-Za-z]{1,2}\d{1,2}-\d{2}[A-Za-z]{1,3})(?![A-Za-z0-9])"
+    r"|(?<![0-9])(\d{1,2}-\d{2}[A-Za-z]{1,3})(?![A-Za-z0-9])",
+    re.I,
+)
+# beyblade.phstudy.org keeps BX-00 / CX-00 / UX-00 as shop umbrella labels.
+# Canonical ids are BXG- (retail), BXH- (event prize), BXC- (collab),
+# or BXA- (campaign and character collab). BXA-02 is an alias of BXG-25.
+_ALIAS_AS_CODE = {
+    "EVANGELION": ("BXG-57", "CX"),
+    "TIGA": ("BXG-70", "CX"),
+    "LAUNCHER": ("BXG-62", "BX"),
+    "SUSHIRO": ("BXA-01", "BX"),
+    "CAPTAIN": ("BXA-03", "BX"),
+    "HULK": ("BXA-03", "BX"),
+    "MILES": ("BXA-04", "BX"),
+    "GOBLIN": ("BXA-04", "BX"),
+    "KENOBI": ("BXA-05", "BX"),
+    "GRIEVOUS": ("BXA-05", "BX"),
+    "CHEWBACCA": ("BXA-06", "BX"),
+    "TROOPER": ("BXA-06", "BX"),
+}
+# phstudy viewer.js BOX_PRODUCT_ALIASES
+_PROMO_REWRITES = {
+    "BXA-02": ("BXG-25", "UX"),
+}
+_ALIAS_PART_AS_CODE = {
+    ("DRAGOON", "2-60C"): ("BXG-09", "BX"),
+    ("COBALT", "2-60C"): ("BXG-09", "BX"),
+    ("COBALT", "9-60F"): ("BXG-53", "BX"),
+    ("DRANZER", "3-80T"): ("BXG-01", "BX"),
+    ("GALE", "3-70RA"): ("BXG-47", "BX"),
+    ("GALE", "3-70A"): ("BXG-47", "BX"),
+    ("MAMMOTH", "2-80E"): ("BXG-32", "BX"),
+    ("STORM", "4-60RA"): ("BXG-22", "BX"),
+    ("STORM", "2-70M"): ("BXG-21", "BX"),
+    ("DRIGER", "4-80P"): ("BXG-04", "BX"),
+    ("LEONE", "5-60P"): ("BXG-05", "BX"),
+    ("LEONE", "6-80GN"): ("BXG-20", "BX"),
+    ("LEONE", "4-60A"): ("BXG-38", "CX"),
+    ("XCALIBUR", "3-60GF"): ("BXG-13", "BX"),
+    ("HELLS", "4-60T"): ("BXG-03", "BX"),
+    ("HELLS", "3-80F"): ("BXC-02", "BX"),
+    ("SCORPIO", "0-70Z"): ("BXG-61", "UX"),
+    ("WIZARD", "4-55LO"): ("BXG-43", "CX"),
+    ("CLOCK", "4-55S"): ("BXC-20", "UX"),
+    ("SUSHIRO", "3-60F"): ("BXA-01", "BX"),
+    ("CAPTAIN", "4-70GB"): ("BXA-03", "BX"),
+    ("HULK", "1-80R"): ("BXA-03", "BX"),
+    ("MILES", "1-60GN"): ("BXA-04", "BX"),
+    ("GOBLIN", "9-80HT"): ("BXA-04", "BX"),
+    ("KENOBI", "4-60P"): ("BXA-05", "BX"),
+    ("GRIEVOUS", "3-80HN"): ("BXA-05", "BX"),
+    ("CHEWBACCA", "4-80LF"): ("BXA-06", "BX"),
+    ("TROOPER", "5-70B"): ("BXA-06", "BX"),
+}
+_BLACK_VARIANT_RE = re.compile(r"黑色|黑版|(?<![A-Za-z])black(?![A-Za-z])", re.I)
+_KUJI_RE = re.compile(r"一番賞|一番くじ|くじ|(?<![A-Za-z])kuji|dmm\s*scratch", re.I)
+_NAME_ALIASES = (
+    (re.compile(r"福音戰士|evangelion|(?<![A-Za-z])eva(?![A-Za-z])", re.I), "EVANGELION"),
+    (re.compile(r"烈風天馬|stormpegasis|storm\s*pegasus", re.I), "GALE"),
+    (re.compile(r"暴風戰龍|暴風巨神|dragoon\s*storm|storm\s*sprigan|dragon\s*storm", re.I), "STORM"),
+    (re.compile(r"翔空天馬|aero\s*pegasus|藍空力天馬", re.I), "AERO"),
+    (re.compile(r"迪加|迪迦|(?<![A-Za-z])tiga(?![A-Za-z])", re.I), "TIGA"),
+    (re.compile(r"朱雀戰神|dranzerspiral|(?<![A-Za-z])dranzer(?![A-Za-z])", re.I), "DRANZER"),
+    (re.compile(r"鈷藍青龍|鈷藍魔龍|cobaltdragoon|cobalt\s*dragoon", re.I), "COBALT"),
+    (re.compile(r"青翼白虎|(?<![A-Za-z])driger(?![A-Za-z])", re.I), "DRIGER"),
+    (re.compile(r"神力聖劍|终极骑士|終極騎士|xeno\s*xcalibur|(?<![A-Za-z])xcalibur(?![A-Za-z])", re.I), "XCALIBUR"),
+    (re.compile(r"巫師弧光|(?<![A-Za-z])wizard(?![A-Za-z])", re.I), "WIZARD"),
+    (re.compile(r"天蠍|scorpiospear|(?<![A-Za-z])scorpio(?![A-Za-z])", re.I), "SCORPIO"),
+    (re.compile(r"猛獁|狂象|mammothtusk|(?<![A-Za-z])mammoth(?![A-Za-z])", re.I), "MAMMOTH"),
+    (re.compile(r"龍騎士|(?<![A-Za-z])dragoon(?![A-Za-z])", re.I), "DRAGOON"),
+    (re.compile(r"獅子|レオーネ|(?<![A-Za-z])leone(?![A-Za-z])", re.I), "LEONE"),
+    (re.compile(r"時鐘幻影|時鐘幽景|clock\s*mirage", re.I), "CLOCK"),
+    (re.compile(r"地獄尺寸|地獄鐮刀|煉獄魔鐮|hells?\s*s(?:cythe|ize)", re.I), "HELLS"),
+    (re.compile(
+        r"(?:壽司郎|sushiro).{0,16}(?:翔龍神劍|dransword|dran\s*sword)"
+        r"|(?:翔龍神劍|dransword|dran\s*sword).{0,16}(?:壽司郎|sushiro)",
+        re.I,
+    ), "SUSHIRO"),
+    (re.compile(r"美國隊長|captain\s*america", re.I), "CAPTAIN"),
+    (re.compile(r"紅浩克|red\s*hulk", re.I), "HULK"),
+    (re.compile(r"終極蜘蛛俠|miles\s*morales", re.I), "MILES"),
+    (re.compile(r"綠惡魔|green\s*goblin", re.I), "GOBLIN"),
+    (re.compile(r"歐比王|obi[-\s]*wan|(?<![A-Za-z])kenobi(?![A-Za-z])", re.I), "KENOBI"),
+    (re.compile(r"葛里維斯|(?<![A-Za-z])grievous(?![A-Za-z])", re.I), "GRIEVOUS"),
+    (re.compile(r"丘巴卡|(?<![A-Za-z])chewbacca(?![A-Za-z])", re.I), "CHEWBACCA"),
+    (re.compile(r"風暴兵|storm\s*trooper", re.I), "TROOPER"),
+    (re.compile(r"蜘蛛人|蜘蛛俠|marvel|(?<![A-Za-z])miles(?![A-Za-z])", re.I), "MARVEL"),
+    (re.compile(r"旋風發射器|發射器限定|(?<![A-Za-z])launcher(?![A-Za-z])", re.I), "LAUNCHER"),
+)
+
+
+def _canonical_model_code(code):
+    code = re.sub(r"\s+", "", (code or "").upper())
+    promo = re.fullmatch(r"(BXG|BXH|BXC|BXA)-?(\d{2})(?:-?(\d{2}))?", code)
+    if not promo:
+        return code
+    suffix = ("-%s" % promo.group(3)) if promo.group(3) else ""
+    normalized = "%s-%s%s" % (promo.group(1), promo.group(2), suffix)
+    rewritten = _PROMO_REWRITES.get(normalized)
+    return rewritten[0] if rewritten else normalized
+
+
+def _specific_line_code(text):
+    for match in _SPECIFIC_CODE_RE.finditer(text or ""):
+        code = _canonical_model_code(match.group(1))
+        if re.search(r"-?00$", code):
+            continue
+        return code
+    return ""
+
+
+def _part_codes(text):
+    found = []
+    for match in _PART_CODE_RE.finditer(text or ""):
+        code = (match.group(1) or match.group(2) or "").upper()
+        if code and code not in found:
+            found.append(code)
+    return found
+
+
+def _plain_part(code):
+    match = re.match(r"^[A-Z]{1,2}(\d{1,2}-\d{2}[A-Z]{1,3})$", code or "")
+    return match.group(1) if match else code
+
+
+def _part_code(text):
+    codes = []
+    for code in _part_codes(text):
+        plain = _plain_part(code)
+        if plain and plain not in codes:
+            codes.append(plain)
+    return codes[0] if len(codes) == 1 else ""
+
+
+def _resolve_alias(text):
+    alias = _alias_token(text)
+    if not alias:
+        return None
+    part = _part_code(text)
+    if alias == "DRANZER" and part == "3-80T" and _BLACK_VARIANT_RE.search(text or ""):
+        return {"model": "BXG-15", "tag": "BX"}
+    if alias == "AERO" and part == "3-70A" and re.search(r"紅色|紅版|(?<![A-Za-z])red(?![A-Za-z])", text or "", re.I):
+        return {"model": "BXG-24", "tag": "UX"}
+    resolved = _ALIAS_PART_AS_CODE.get((alias, part))
+    if resolved is None:
+        resolved = _ALIAS_AS_CODE.get(alias)
+    if not resolved:
+        return None
+    return {"model": resolved[0], "tag": resolved[1]}
+
+
+def _alias_token(text):
+    for pattern, token in _NAME_ALIASES:
+        if pattern.search(text or ""):
+            return token
+    return ""
+
+
+def _fold_variant(text):
+    cleaned = _UMBRELLA_CODE_RE.sub(" ", text or "")
+    cleaned = re.sub(r"\[[^\]]*\]|【[^】]*】|（[^）]*）|\([^)]*\)", " ", cleaned)
+    cleaned = re.sub(
+        r"行版|港版|日版|海外版|限定版|現貨|預訂|訂金|售價|takara\s*tomy|beyblade\s*x|爆旋陀螺\s*x",
+        " ",
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff:+-]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", "", cleaned).strip("-:")
+    return "".join(ch.upper() if ch.isascii() else ch for ch in cleaned)
+
+
+def _kuji_fields(text):
+    if not _KUJI_RE.search(text or ""):
+        return None
+    vol = re.search(r"(?:vol\.?\s*|第\s*)(\d{1,2})", text, re.I)
+    whole_case = re.search(r"原箱|\d+\s*pcs", text, re.I) and not re.search(
+        r"[A-G]\s*賞", text, re.I
+    )
+    prize = ""
+    if whole_case:
+        prize = "CASE"
+    else:
+        found = re.search(r"([A-G](?:\s*\+\s*[A-G])*)\s*賞", text, re.I)
+        if not found:
+            found = re.search(r"prize\s*([A-G](?:\s*\+\s*[A-G])*)", text, re.I)
+        if found:
+            prize = re.sub(r"[^A-G]", "", found.group(1).upper())
+        elif re.search(r"最後賞|ラストワン|last\s*賞|last\s*(?:one|chance)", text, re.I):
+            prize = "LAST"
+    parts = ["KUJI", "DMM"]
+    if vol:
+        parts.append("V%s" % vol.group(1))
+    if prize:
+        parts.append(prize)
+    return {"model": "-".join(parts), "tag": "other"}
+
+
+def _mapped_alias_fields(text):
+    if _specific_line_code(text) or _UMBRELLA_CODE_RE.search(text or ""):
+        return None
+    return _resolve_alias(text)
+
+
+def _umbrella_fields(text):
+    umbrellas = list(_UMBRELLA_CODE_RE.finditer(text or ""))
+    umbrella = umbrellas[-1] if umbrellas else None
+    specific = _specific_line_code(text)
+    if specific:
+        tag = umbrella.group(1).upper() if umbrella else specific[:2]
+        if not umbrella and re.search(r"(?<![A-Za-z0-9])BXA-?\s?02(?![0-9])", text or "", re.I):
+            tag = "UX"
+        return {"model": specific, "tag": tag}
+    if not umbrella:
+        return None
+    line = umbrella.group(1).upper()
+    alias = _alias_token(text)
+    part = _part_code(text)
+    resolved = _resolve_alias(text)
+    if resolved:
+        return resolved
+    if alias:
+        model = "%s-00:%s" % (line, alias)
+        if part:
+            model = "%s:%s" % (model, part)
+        return {"model": model, "tag": line}
+    variant = _fold_variant(text)
+    if not variant:
+        variant = "UNKNOWN"
+    return {"model": "%s-00:%s" % (line, variant), "tag": line}
+
+
+def classify_product_line(text):
+    text = text or ""
+    text = re.sub(r"\bB0[A-Z0-9]{8}\b", " ", text, flags=re.I)
+    text = re.sub(r"\b\d{12,14}\b", " ", text)
+    kuji = _kuji_fields(text)
+    if kuji:
+        return kuji
+    umbrella = _umbrella_fields(text)
+    if umbrella:
+        return umbrella
+    mapped = _mapped_alias_fields(text)
+    if mapped:
+        return mapped
     match = LINE_MODEL_RE.search(text)
-    if not match:
-        return {"model": "", "tag": "other"}
-    return {"model": match.group(1).upper(), "tag": match.group(2).upper()}
+    if match:
+        return {"model": match.group(1).upper(), "tag": match.group(2).upper()}
+    return {"model": "", "tag": "other"}
+
+
+def product_line_fields(item):
+    item = item or {}
+    title = " ".join(str(item.get(key) or "") for key in ("title", "name"))
+    sku = str(item.get("sku") or "")
+    fields = classify_product_line(title)
+    if not fields.get("model") and sku:
+        fields = classify_product_line(sku)
+    return fields
 
 
 def notify_history_row(item, shop_id="", shop="", event="new", changed_at=""):
     item = item or {}
     line = product_line_fields(item)
     change = status_change_text(item.get("prev_status"), stock_status(item), event)
+    if event == "price_drop":
+        change = price_value_text(item)
     sku = str(item.get("sku") or "")
     image_path = str(item.get("image_path") or "")
     if not image_path and shop_id and sku:
@@ -956,6 +1357,7 @@ def notify_history_row(item, shop_id="", shop="", event="new", changed_at=""):
         "to": stock_status(item),
         "image": str(item.get("image") or product_image_url(item) or ""),
         "image_path": image_path,
+        "description": str(item.get("description") or ""),
     }
 
 
@@ -1116,11 +1518,26 @@ def load_notify_history_jsonl(path=None, limit=100, shop_id="", model="", shops=
     return filter_notify_history(rows, shop_id, model, shops)[:limit]
 
 
+def ensure_notify_history_description(conn):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) AS n FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notify_history' "
+            "AND COLUMN_NAME = 'description'"
+        )
+        row = cur.fetchone() or {}
+        if int(row.get("n") or 0):
+            return
+        cur.execute("ALTER TABLE notify_history ADD COLUMN description TEXT NULL")
+    conn.commit()
+
+
 def load_notify_history_mysql(limit=100, shop_id="", model=""):
     conn = mysql_connect()
     try:
+        ensure_notify_history_description(conn)
         sql = (
-            "SELECT at, shop_id, shop, event, sku, title, `model`, `tag`, price, url, `change`, image, image_path "
+            "SELECT at, shop_id, shop, event, sku, title, `model`, `tag`, price, url, `change`, image, image_path, description "
             "FROM notify_history"
         )
         args = []
@@ -1174,8 +1591,9 @@ def notify_day_label(day, today):
 def load_notify_history_mysql_for_day(day):
     conn = mysql_connect()
     try:
+        ensure_notify_history_description(conn)
         sql = (
-            "SELECT at, shop_id, shop, event, sku, title, `model`, `tag`, price, url, `change`, image, image_path "
+            "SELECT at, shop_id, shop, event, sku, title, `model`, `tag`, price, url, `change`, image, image_path, description "
             "FROM notify_history WHERE `at` LIKE %s AND event IN ('new','restock','sold_out') "
             "ORDER BY id ASC"
         )
@@ -1445,6 +1863,7 @@ def discord_product_payload(title, items, fallback_url=None, event="new"):
         "new": {"label": "新品", "color": 3901635},
         "restock": {"label": "補貨", "color": 5763719},
         "sold_out": {"label": "變為缺貨", "color": 15548997},
+        "price_drop": {"label": "降價", "color": 16750848},
     }
     style = styles.get(event) or styles["new"]
     embeds = []
@@ -1456,20 +1875,18 @@ def discord_product_payload(title, items, fallback_url=None, event="new"):
             first_url = url
         status = stock_status(item)
         if status == "in_stock":
-            stock_value = "🟢 有貨"
             color = 5763719
         elif status == "out_of_stock":
-            stock_value = "🔴 缺貨"
             color = 15548997
         else:
-            stock_value = "⚪ 未知"
             color = style["color"]
         if event == "sold_out":
             color = 15548997
         elif event == "restock":
             color = 5763719
-        price = item.get("price")
-        price_value = "HK$%s" % price if price else "—"
+        elif event == "price_drop":
+            color = 16750848
+        price_value = price_value_text(item)
         changed_at = item.get("changed_at") or now_stamp()
         change = status_change_text(item.get("prev_status"), status, event)
         time_label = changed_at if str(changed_at).endswith("HKT") else "%s HKT" % changed_at
@@ -1478,10 +1895,13 @@ def discord_product_payload(title, items, fallback_url=None, event="new"):
             {"name": "時間", "value": time_label, "inline": True},
             {"name": "價錢", "value": price_value, "inline": True},
         ]
+        bundle_text = "\n".join(bundle_notice_lines(item))
+        if bundle_text:
+            fields.append({"name": "套裝內容", "value": bundle_text[:1024], "inline": False})
         if url:
             fields.append({"name": "連結", "value": "[開啟商品](%s)" % url, "inline": False})
         embed = {
-            "author": {"name": "%s · %s" % (title, style["label"])},
+            "author": {"name": "%s · %s" % (title, notify_kind_label(event, item))},
             "title": name[:256],
             "url": url,
             "color": color,
@@ -1685,9 +2105,23 @@ def telegram_chat_id():
     return str(raw or "").strip()
 
 
-def telegram_notify_enabled(kind):
+def telegram_message_thread_id():
+    raw = os.environ.get("TELEGRAM_MESSAGE_THREAD_ID")
+    if raw is None or str(raw).strip() == "":
+        raw = telegram_cfg().get("message_thread_id")
+    text = str(raw or "").strip()
+    if not text:
+        return 0
+    try:
+        value = int(text)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
+def telegram_notify_enabled(kind, force=False):
     notify = telegram_cfg()
-    if notify.get("enabled") is False:
+    if notify.get("enabled") is False and not force:
         return False
     if not telegram_bot_token() or not telegram_chat_id():
         return False
@@ -1703,12 +2137,6 @@ def telegram_html(text):
 
 
 def telegram_product_text(title, items, fallback_url=None, event="new"):
-    styles = {
-        "new": "新品",
-        "restock": "補貨",
-        "sold_out": "變為缺貨",
-    }
-    label = styles.get(event) or styles["new"]
     blocks = []
     for item in (items or [])[:10]:
         name = item.get("title") or item.get("sku") or "New product"
@@ -1717,8 +2145,7 @@ def telegram_product_text(title, items, fallback_url=None, event="new"):
         change = status_change_text(item.get("prev_status"), status, event)
         changed_at = item.get("changed_at") or now_stamp()
         time_label = changed_at if str(changed_at).endswith("HKT") else "%s HKT" % changed_at
-        price = item.get("price")
-        price_value = "HK$%s" % price if price else "—"
+        price_value = price_value_text(item)
         if url:
             heading = '<a href="%s">%s</a>' % (telegram_html(url), telegram_html(name))
         else:
@@ -1726,12 +2153,14 @@ def telegram_product_text(title, items, fallback_url=None, event="new"):
         blocks.append(
             "\n".join(
                 [
-                    "<b>%s · %s</b>" % (telegram_html(title), telegram_html(label)),
+                    "<b>%s · %s</b>"
+                    % (telegram_html(title), telegram_html(notify_kind_label(event, item))),
                     heading,
                     "庫存: %s" % telegram_html(change),
                     "時間: %s" % telegram_html(time_label),
                     "價錢: %s" % telegram_html(price_value),
                 ]
+                + ["套裝: %s" % telegram_html(line) for line in bundle_notice_lines(item)]
             )
         )
     extra = len(items or []) - 10
@@ -1740,29 +2169,12 @@ def telegram_product_text(title, items, fallback_url=None, event="new"):
     return "\n\n".join(blocks)
 
 
-def telegram_preview_image(item):
-    image = product_image_url(item)
-    if not image:
-        return ""
-    return shopline_og_image_url(image) or image
-
-
-def post_telegram(text, preview_url=None):
+def send_telegram_payload(method, payload):
     token = telegram_bot_token()
     chat_id = telegram_chat_id()
-    if not token or not chat_id or not text:
+    if not token or not chat_id or not payload:
         return False
-    url = "https://api.telegram.org/bot%s/sendMessage" % token
-    options = {"is_disabled": False, "prefer_large_media": True}
-    preview = str(preview_url or "").strip()
-    if preview:
-        options["url"] = preview
-    payload = {
-        "chat_id": chat_id,
-        "text": text[:4096],
-        "parse_mode": "HTML",
-        "link_preview_options": options,
-    }
+    url = "https://api.telegram.org/bot%s/%s" % (token, method)
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -1773,44 +2185,97 @@ def post_telegram(text, preview_url=None):
         },
         method="POST",
     )
+    raw = ""
     try:
         with urllib.request.urlopen(req, timeout=20, context=ssl_context()) as resp:
-            resp.read()
-        return True
-    except Exception:
-        proc = subprocess.run(
-            [
-                "curl",
-                "-sS",
-                "-A",
-                USER_AGENT,
-                "-H",
-                "Content-Type: application/json",
-                "-X",
-                "POST",
-                url,
-                "-d",
-                json.dumps(payload),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stderr.strip() or "telegram sendMessage failed")
-        return True
-
-
-def notify_telegram_products(title, items, fallback_url=None, event="new"):
-    if not telegram_notify_enabled("products") or not items:
-        return False
-    preview = ""
-    for item in (items or [])[:10]:
-        preview = telegram_preview_image(item)
-        if preview:
-            break
+            raw = resp.read().decode("utf-8")
+    except Exception as exc:
+        if hasattr(exc, "read"):
+            try:
+                raw = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                raw = ""
+        if not raw:
+            proc = subprocess.run(
+                [
+                    "curl",
+                    "-sS",
+                    "-A",
+                    USER_AGENT,
+                    "-H",
+                    "Content-Type: application/json",
+                    "-X",
+                    "POST",
+                    url,
+                    "-d",
+                    json.dumps(payload),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(proc.stderr.strip() or ("telegram %s failed" % method))
+            raw = proc.stdout or ""
     try:
-        post_telegram(telegram_product_text(title, items, fallback_url, event=event), preview_url=preview)
+        data = json.loads(raw or "")
+    except Exception:
+        data = {}
+    if not isinstance(data, dict) or not data.get("ok"):
+        err = ""
+        if isinstance(data, dict):
+            err = str((data.get("description") or data.get("error") or "")).strip()
+        raise RuntimeError(err or ("telegram %s failed" % method))
+    return True
+
+
+def telegram_message_payload(text, thread_id=None, preview_url=None):
+    options = {"is_disabled": False, "prefer_large_media": True}
+    preview = str(preview_url or "").strip()
+    if preview:
+        options["url"] = preview
+    payload = {
+        "chat_id": telegram_chat_id(),
+        "text": str(text or "")[:4096],
+        "parse_mode": "HTML",
+        "link_preview_options": options,
+    }
+    if thread_id:
+        payload["message_thread_id"] = int(thread_id)
+    return payload
+
+
+def send_telegram_message(text, thread_id=None, preview_url=None):
+    chat_id = telegram_chat_id()
+    if not chat_id or not text:
+        return False
+    payload = telegram_message_payload(text, thread_id=thread_id, preview_url=preview_url)
+    return send_telegram_payload("sendMessage", payload)
+
+
+def post_telegram(text, thread_id=None, preview_url=None):
+    if thread_id is None:
+        thread_id = telegram_message_thread_id()
+    if thread_id:
+        try:
+            return send_telegram_message(text, thread_id=thread_id, preview_url=preview_url)
+        except Exception as exc:
+            print(
+                "Telegram topic %s failed: %s; sending to default chat."
+                % (thread_id, exc),
+                file=sys.stderr,
+            )
+    return send_telegram_message(text, thread_id=None, preview_url=preview_url)
+
+
+def notify_telegram_products(title, items, fallback_url=None, event="new", force=False, thread_id=None):
+    if not telegram_notify_enabled("products", force=force) or not items:
+        return False
+    try:
+        post_telegram(
+            telegram_product_text(title, items, fallback_url, event=event),
+            thread_id=thread_id,
+        )
         return True
     except Exception as exc:
         print("Telegram product notify failed: %s" % exc, file=sys.stderr)
@@ -1930,14 +2395,107 @@ def threads_media_id_from_response(raw):
     return str(data.get("id") or "").strip()
 
 
+def threads_daily_posts_path():
+    return os.path.join(resolved_data_dir(), "threads_daily_posts.json")
+
+
+def threads_daily_post_limit():
+    raw = threads_cfg().get("daily_post_limit", THREADS_DEFAULT_DAILY_POST_LIMIT)
+    try:
+        limit = int(raw)
+    except (TypeError, ValueError):
+        limit = THREADS_DEFAULT_DAILY_POST_LIMIT
+    return max(limit, 0)
+
+
+def _threads_daily_date_key():
+    return datetime.now(HKT_TZ).strftime("%Y-%m-%d")
+
+
+def load_threads_daily_posts(path=None):
+    path = path or threads_daily_posts_path()
+    with _threads_io_lock:
+        if not os.path.isfile(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+
+def save_threads_daily_posts(data, path=None):
+    path = path or threads_daily_posts_path()
+    with _threads_io_lock:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+            fh.write("\n")
+        os.replace(tmp, path)
+    return True
+
+
+def threads_daily_posts_used(path=None):
+    data = load_threads_daily_posts(path)
+    if data.get("date") != _threads_daily_date_key():
+        return 0
+    try:
+        return max(int(data.get("count") or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def threads_daily_posts_remaining(path=None):
+    return max(threads_daily_post_limit() - threads_daily_posts_used(path), 0)
+
+
+def increment_threads_daily_posts(n=1, path=None):
+    n = max(int(n or 0), 0)
+    if n <= 0:
+        return 0
+    path = path or threads_daily_posts_path()
+    with _threads_io_lock:
+        data = load_threads_daily_posts(path)
+        day = _threads_daily_date_key()
+        if data.get("date") != day:
+            data = {"date": day, "count": 0}
+        data["count"] = int(data.get("count") or 0) + n
+        save_threads_daily_posts(data, path=path)
+        return int(data["count"])
+
+
 def post_threads(text, reply_to_id=None):
     url = threads_publish_url()
     token = threads_access_token()
     if not url or not token or not text:
         return False
+    if threads_daily_posts_remaining() <= 0:
+        print(
+            "Threads post skipped (daily limit %d reached)."
+            % threads_daily_post_limit(),
+            file=sys.stderr,
+        )
+        return False
     payload = threads_publish_fields(text, reply_to_id=reply_to_id)
     raw = threads_form_post(url, payload)
-    return threads_media_id_from_response(raw) or True
+    try:
+        data = json.loads(raw or "")
+    except Exception:
+        data = None
+    if isinstance(data, dict) and data.get("error"):
+        err = data.get("error")
+        if isinstance(err, dict):
+            err = err.get("message") or err
+        print("Threads post failed: %s" % err, file=sys.stderr)
+        return False
+    media_id = threads_media_id_from_response(raw)
+    if not media_id:
+        print("Threads post failed: no media id.", file=sys.stderr)
+        return False
+    increment_threads_daily_posts(1)
+    return media_id
 
 
 def status_settings():
@@ -1965,11 +2523,107 @@ def cloudflare_purge_settings():
     return {"token": str(token), "zone_id": str(zone_id)}
 
 
-def purge_edge_cache(urlopen=None):
+def edge_purge_log_path(data_dir=None):
+    return os.path.join(data_dir or resolved_data_dir(), EDGE_PURGE_LOG_NAME)
+
+
+def _purge_now(now):
+    if now is None:
+        return time.time()
+    if callable(now):
+        return float(now())
+    return float(now)
+
+
+def _purge_stamp(when):
+    return datetime.fromtimestamp(when, HKT_TZ).strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _parse_purge_stamp(value):
+    text = str(value or "").strip()
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            local = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        return local.replace(tzinfo=HKT_TZ).timestamp()
+    return None
+
+
+def prune_edge_purge_log(path=None, now=None, keep_days=EDGE_PURGE_LOG_KEEP_DAYS):
+    path = path or edge_purge_log_path()
+    cutoff = _purge_now(now) - int(keep_days) * 86400
+    if not os.path.isfile(path):
+        return 0
+    kept = []
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                row = json.loads(text)
+            except ValueError:
+                continue
+            stamped = _parse_purge_stamp(row.get("at"))
+            if stamped is None or stamped >= cutoff:
+                kept.append(text)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        if kept:
+            fh.write("\n".join(kept) + "\n")
+    os.replace(tmp, path)
+    return len(kept)
+
+
+def append_edge_purge_log(result, path=None, now=None):
+    when = _purge_now(now)
+    path = path or edge_purge_log_path()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    row = {
+        "at": _purge_stamp(when),
+        "ok": bool((result or {}).get("ok")),
+        "cloudflare": bool((result or {}).get("cloudflare")),
+    }
+    for key in ("error", "detail", "http", "response", "reason"):
+        value = (result or {}).get(key)
+        if value not in (None, ""):
+            row[key] = value
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+    return prune_edge_purge_log(path=path, now=when)
+
+
+def prune_edge_purge_log_once_per_day(last_day, now=None, path=None):
+    when = _purge_now(now)
+    day = datetime.fromtimestamp(when, HKT_TZ).strftime("%Y-%m-%d")
+    if day == last_day:
+        return last_day
+    prune_edge_purge_log(path=path, now=when)
+    return day
+
+
+def _edge_purge_http_status(response):
+    status = getattr(response, "status", None)
+    if status is None:
+        status = getattr(response, "code", None)
+    return int(status or 200)
+
+
+def _finish_edge_purge(result, log_path=None, now=None):
+    append_edge_purge_log(result, path=log_path, now=now)
+    return result
+
+
+def purge_edge_cache(urlopen=None, log_path=None, now=None):
     reset_status_caches()
     cfg = cloudflare_purge_settings()
     if not cfg["token"] or not cfg["zone_id"]:
-        return {"ok": False, "origin": True, "cloudflare": False, "error": "missing_token"}
+        return _finish_edge_purge(
+            {"ok": False, "origin": True, "cloudflare": False, "error": "missing_token"},
+            log_path=log_path,
+            now=now,
+        )
     url = "https://api.cloudflare.com/client/v4/zones/%s/purge_cache" % cfg["zone_id"]
     payload = json.dumps({"tags": [HTML_CACHE_TAG]}).encode("utf-8")
     request = urllib.request.Request(
@@ -1985,28 +2639,48 @@ def purge_edge_cache(urlopen=None):
     try:
         with opener(request, timeout=20) as response:
             raw = response.read()
+            status = _edge_purge_http_status(response)
     except urllib.error.HTTPError as exc:
         detail = ""
         try:
-            detail = exc.read().decode("utf-8", "replace")[:300]
+            detail = exc.read().decode("utf-8", "replace")[:2000]
         except Exception:
             detail = ""
-        return {
-            "ok": False,
-            "origin": True,
-            "cloudflare": False,
-            "error": "cloudflare_http_%s" % exc.code,
-            "detail": detail,
-        }
+        return _finish_edge_purge(
+            {
+                "ok": False,
+                "origin": True,
+                "cloudflare": False,
+                "error": "cloudflare_http_%s" % exc.code,
+                "http": exc.code,
+                "detail": detail,
+            },
+            log_path=log_path,
+            now=now,
+        )
     except Exception as exc:
-        return {"ok": False, "origin": True, "cloudflare": False, "error": str(exc)[:300]}
+        return _finish_edge_purge(
+            {"ok": False, "origin": True, "cloudflare": False, "error": str(exc)[:300]},
+            log_path=log_path,
+            now=now,
+        )
     try:
         data = json.loads(raw.decode("utf-8") or "{}")
     except Exception:
-        data = {}
-    if not data.get("success"):
-        return {"ok": False, "origin": True, "cloudflare": False, "error": "cloudflare_rejected"}
-    return {"ok": True, "origin": True, "cloudflare": True}
+        data = {"raw": raw.decode("utf-8", "replace")[:2000]}
+    if not isinstance(data, dict):
+        data = {"raw": data}
+    ok = bool(data.get("success"))
+    result = {
+        "ok": ok,
+        "origin": True,
+        "cloudflare": ok,
+        "http": status,
+        "response": data,
+    }
+    if not ok:
+        result["error"] = "cloudflare_rejected"
+    return _finish_edge_purge(result, log_path=log_path, now=now)
 
 
 def reset_edge_purge_state():
@@ -2045,7 +2719,9 @@ def flush_edge_purge(now=None, urlopen=None):
             return {"ok": False, "skipped": True, "reason": "rate_limit", "origin": True}
         if not cloudflare_purge_settings()["token"]:
             _edge_purge_pending = False
-            return {"ok": False, "origin": True, "cloudflare": False, "error": "missing_token"}
+            result = {"ok": False, "origin": True, "cloudflare": False, "error": "missing_token"}
+            append_edge_purge_log(result)
+            return result
         _edge_purge_at.append(now)
         _edge_purge_at[:] = [t for t in _edge_purge_at if now - t < EDGE_PURGE_LONG_WINDOW]
     result = purge_edge_cache(urlopen=urlopen)
@@ -2118,7 +2794,9 @@ def start_listing_watch_loop(interval=None, stop=None, data_dir=None):
 
     def run():
         prev = listing_state_fingerprint(data_dir)
+        last_purge_prune_day = ""
         while True:
+            last_purge_prune_day = prune_edge_purge_log_once_per_day(last_purge_prune_day)
             if stop is not None and stop.wait(interval):
                 return
             if stop is None:
@@ -2491,6 +3169,90 @@ def product_tag_key(item):
             return "other"
         return tag.upper()
     return product_line_fields(item)["tag"]
+
+
+def listing_model_code(item):
+    item = item or {}
+    stored = str(item.get("model") or "").strip().upper()
+    parsed = str(product_line_fields(item).get("model") or "").strip().upper()
+    text = " ".join(str(item.get(key) or "") for key in ("title", "sku", "name"))
+    if parsed and (_UMBRELLA_CODE_RE.search(text) or _KUJI_RE.search(text)):
+        model = parsed
+    else:
+        model = stored or parsed
+    model = re.sub(r"^(CX|BX|UX)(?=\d)", r"\1-", model)
+    return _canonical_model_code(model)
+
+
+def listing_price_value(item):
+    raw = str((item or {}).get("price") or "").replace(",", "")
+    match = re.search(r"\d+(?:\.\d+)?", raw)
+    if not match:
+        return None
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
+
+
+def listing_rank(item):
+    price = listing_price_value(item)
+    return (
+        0 if product_stock_key(item) == "in_stock" else 1,
+        price if price is not None else 10 ** 12,
+    )
+
+
+def group_listings_by_model(items):
+    groups = []
+    index = {}
+    for item in items or []:
+        model = listing_model_code(item)
+        if model:
+            key = "model:" + model
+        else:
+            key = "item:%s:%s:%s" % (
+                item.get("shop_id") or "",
+                item.get("sku") or "",
+                item.get("title") or "",
+            )
+        group = index.get(key)
+        if group is None:
+            group = {"model": model, "items": []}
+            index[key] = group
+            groups.append(group)
+        group["items"].append(item)
+
+    def sort_key(group):
+        if group["model"]:
+            return (0, group["model"])
+        title = str((group["items"][0] or {}).get("title") or "")
+        return (1, title)
+
+    groups.sort(key=sort_key)
+    return groups
+
+
+def group_tag_key(group):
+    model = str((group or {}).get("model") or "")
+    if model.startswith("KUJI"):
+        return "other"
+    if re.match(r"^(CX|BX|UX)G", model):
+        for item in (group or {}).get("items") or []:
+            tag = product_line_fields(item).get("tag")
+            if tag in ("CX", "BX", "UX"):
+                return tag
+    if model.startswith("CX"):
+        return "CX"
+    if model.startswith("BX"):
+        return "BX"
+    if model.startswith("UX"):
+        return "UX"
+    for item in (group or {}).get("items") or []:
+        tag = product_tag_key(item)
+        if tag in ("CX", "BX", "UX"):
+            return tag
+    return "other"
 
 
 def filter_shop_products(items, stock_filter="", tag_filter=""):
