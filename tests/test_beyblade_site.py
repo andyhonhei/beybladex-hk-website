@@ -2591,6 +2591,10 @@ class ModelGridTests(unittest.TestCase):
             "BXA-03",
         )
         self.assertEqual(listing_model_code({"title": "BXA-02"}), "BXG-25")
+        self.assertEqual(
+            listing_model_code({"model": "BX-00", "title": "BX-00 Marvel"}),
+            "BXA-04",
+        )
 
     def test_group_merges_same_model_in_alpha_order(self):
         groups = group_listings_by_model(
@@ -2616,7 +2620,59 @@ class ModelGridTests(unittest.TestCase):
         self.assertEqual(groups[1]["items"][0]["title"], "Zebra part")
 
     def test_models_page_merges_stock_and_uses_cheapest_notify_image(self):
-        page = render_models_html(
+        import parts_catalog
+        import site_pages
+
+        with tempfile.TemporaryDirectory() as dest:
+            with open(os.path.join(dest, "products.json"), "w", encoding="utf-8") as fh:
+                fh.write("{}")
+            site_pages._CATALOG_PRODUCT_CACHE["stamp"] = None
+            with mock.patch.object(parts_catalog, "PARTS_DIR", dest):
+                page = self._render_merged_models_page()
+        button = page.split("<button type='button' class='catalog-card__hit'", 1)[1].split("</button>", 1)[0]
+        self.assertIn("src='https://cdn.example/cheap.jpg'", button)
+        self.assertNotIn("expensive.jpg", button)
+        self.assertNotIn("old.jpg", button)
+        self.assertEqual(page.count("<article class='catalog-card product-card'"), 4)
+        self.assertIn("out.jpg", page)
+        self.assertIn("https://b.example/2", page)
+        self.assertIn("https://c.example/6", page)
+        self.assertNotIn("2 間店", page)
+        self.assertNotIn("最低 HK$", page)
+        self.assertIn("HK$120 – HK$200", button)
+        self.assertIn(">有貨<", button)
+        self.assertNotIn("缺貨", button)
+        marker = "<h2 class='catalog-card__name'>UX-10 sold out</h2>"
+        start = page.rfind("<article class='catalog-card product-card'", 0, page.index(marker))
+        sold = page[start:page.find("</article>", start)]
+        self.assertIn("缺貨", sold)
+        self.assertIn("HK$90", sold)
+        self.assertIn('href="/models?stock=in"', page)
+        self.assertIn('href="/models?stock=out"', page)
+        self.assertIn("有貨 3", page)
+        self.assertIn("缺貨 2", page)
+        self.assertIn("class='stock-out'", page)
+        self.assertIn("class='stock-in'", page)
+        self.assertNotIn("catalog-card__shops", page)
+        self.assertNotIn("ShopA", button)
+        self.assertNotIn("ShopB", button)
+        self.assertIn("ShopA", page)
+        self.assertIn("ShopB", page)
+        self.assertIn('id="model-modal"', page)
+        self.assertIn("repeat(3,minmax(0,1fr))", page)
+        self.assertIn("repeat(6,minmax(0,1fr))", page)
+        self.assertIn("repeat(8,minmax(0,1fr))", page)
+        self.assertIn("object-fit:contain", page)
+        self.assertIn("letter-spacing:0", page)
+        self.assertIn("text-transform:none", page)
+        self.assertIn("BX-01", page)
+        self.assertIn("Mystery blade", page)
+        self.assertIn("Another mystery", page)
+        self.assertIn("現貨圖庫", page)
+        self.assertIn('href="/models?tag=BX"', page)
+
+    def _render_merged_models_page(self):
+        return render_models_html(
             [
                 {
                     "sku": "1",
@@ -2689,45 +2745,66 @@ class ModelGridTests(unittest.TestCase):
                 },
             ]
         )
-        self.assertEqual(page.count("<article class='catalog-card product-card'"), 4)
+
+    def test_model_card_uses_official_catalog_name_and_image(self):
+        import parts_catalog
+        import site_pages
+
+        with tempfile.TemporaryDirectory() as dest:
+            with open(os.path.join(dest, "products.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "BXG-47": {
+                            "id": "BXG-47",
+                            "name_zh": "BXG-47 暴風天馬 3-70RA",
+                            "image_path": "images/products/BXG-47.jpg",
+                        }
+                    },
+                    fh,
+                )
+            site_pages._CATALOG_PRODUCT_CACHE["stamp"] = None
+            with mock.patch.object(parts_catalog, "PARTS_DIR", dest):
+                page = render_models_html(
+                    [
+                        {
+                            "sku": "1",
+                            "shop_id": "h1",
+                            "title": "BX-00 烈風天馬3-70RA",
+                            "model": "BXG-47",
+                            "tag": "BX",
+                            "price": "100",
+                            "status": "in_stock",
+                            "image": "https://shop.example/listing.jpg",
+                        }
+                    ]
+                )
         button = page.split("<button type='button' class='catalog-card__hit'", 1)[1].split("</button>", 1)[0]
-        self.assertIn("src='https://cdn.example/cheap.jpg'", button)
-        self.assertNotIn("expensive.jpg", button)
-        self.assertNotIn("old.jpg", button)
-        self.assertIn("out.jpg", page)
-        self.assertIn("https://b.example/2", page)
-        self.assertIn("https://c.example/6", page)
-        self.assertNotIn("2 間店", page)
-        self.assertNotIn("最低 HK$", page)
-        self.assertIn("HK$120 – HK$200", button)
-        self.assertIn(">有貨<", button)
-        self.assertNotIn("缺貨", button)
-        marker = "<h2 class='catalog-card__name'>UX-10 sold out</h2>"
-        start = page.rfind("<article class='catalog-card product-card'", 0, page.index(marker))
-        sold = page[start:page.find("</article>", start)]
-        self.assertIn("缺貨", sold)
-        self.assertIn("HK$90", sold)
-        self.assertIn('href="/models?stock=in"', page)
-        self.assertIn('href="/models?stock=out"', page)
-        self.assertIn("有貨 3", page)
-        self.assertIn("缺貨 2", page)
-        self.assertIn("class='stock-out'", page)
-        self.assertIn("class='stock-in'", page)
-        self.assertNotIn("catalog-card__shops", page)
-        self.assertNotIn("ShopA", button)
-        self.assertNotIn("ShopB", button)
-        self.assertIn("ShopA", page)
-        self.assertIn("ShopB", page)
-        self.assertIn('id="model-modal"', page)
-        self.assertIn("repeat(3,minmax(0,1fr))", page)
-        self.assertIn("repeat(6,minmax(0,1fr))", page)
-        self.assertIn("repeat(8,minmax(0,1fr))", page)
-        self.assertIn("object-fit:cover", page)
-        self.assertIn("BX-01", page)
-        self.assertIn("Mystery blade", page)
-        self.assertIn("Another mystery", page)
-        self.assertIn("現貨圖庫", page)
-        self.assertIn('href="/models?tag=BX"', page)
+        self.assertIn("<h2 class='catalog-card__name'>暴風天馬 3-70RA</h2>", button)
+        self.assertIn("/parts-images/products/BXG-47.jpg", button)
+        self.assertNotIn("烈風天馬", button)
+        self.assertNotIn("listing.jpg", button)
+        self.assertIn("letter-spacing:0;text-transform:none", page)
+
+    def test_accessory_model_card_uses_official_tool_name_and_image(self):
+        page = render_models_html(
+            [
+                {
+                    "sku": "1",
+                    "shop_id": "h1",
+                    "title": "BX-18 某店旋風發射器",
+                    "model": "BX-18",
+                    "tag": "BX",
+                    "price": "80",
+                    "status": "in_stock",
+                    "image": "https://shop.example/launcher.jpg",
+                }
+            ]
+        )
+        button = page.split("<button type='button' class='catalog-card__hit'", 1)[1].split("</button>", 1)[0]
+        self.assertIn("<h2 class='catalog-card__name'>旋風發射器</h2>", button)
+        self.assertIn("https://beybladehub.app/accessories/raw/BX-18.webp", button)
+        self.assertNotIn("某店旋風發射器", button)
+        self.assertNotIn("launcher.jpg", button)
 
     def test_models_tag_filter_keeps_matching_groups(self):
         items = [

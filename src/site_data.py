@@ -1085,6 +1085,7 @@ _ALIAS_AS_CODE = {
     "HULK": ("BXA-03", "BX"),
     "MILES": ("BXA-04", "BX"),
     "GOBLIN": ("BXA-04", "BX"),
+    "MARVEL": ("BXA-04", "BX"),
     "KENOBI": ("BXA-05", "BX"),
     "GRIEVOUS": ("BXA-05", "BX"),
     "CHEWBACCA": ("BXA-06", "BX"),

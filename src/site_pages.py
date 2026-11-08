@@ -320,7 +320,7 @@ transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}
 color:inherit;font:inherit;text-align:inherit;cursor:pointer}
 .model-grid .catalog-card__image{aspect-ratio:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;
 background:radial-gradient(circle at 50% 40%,#fff 0%,#f4f6fb 58%,#e7edf6 100%)}
-.model-grid .catalog-card__image img{width:100%;height:100%;object-fit:cover;display:block}
+.model-grid .catalog-card__image img{width:100%;height:100%;object-fit:contain;display:block}
 .model-grid .catalog-card__placeholder{font-family:"IBM Plex Mono",monospace;font-size:13px;color:#8a8aaa}
 .model-grid .catalog-card__badge{position:absolute;top:6px;right:6px;z-index:1;background:var(--blue);color:#fff;
 font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:.06em;padding:2px 5px;border-radius:999px}
@@ -328,7 +328,7 @@ font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:.06em;padding
 .model-grid .catalog-card__badge .stock-in,.model-grid .catalog-card__badge .stock-out{color:#fff}
 .model-grid .catalog-card__body{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 8px 8px;text-align:center}
 .model-grid .catalog-card__id{font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.06em;color:#6a6a88}
-.model-grid .catalog-card__name{margin:0;font-family:Inter,system-ui,sans-serif;font-size:11px;font-weight:600;line-height:1.3;color:#0a0a2a;
+.model-grid .catalog-card__name{margin:0;font-family:Inter,system-ui,sans-serif;font-size:11px;font-weight:600;line-height:1.3;letter-spacing:0;text-transform:none;color:#0a0a2a;
 display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}
 .model-grid .catalog-card__subtitle{margin:0;font-family:"IBM Plex Mono",monospace;font-size:10px;line-height:1.3;color:var(--blue)}
 .model-offer .stock-in{color:var(--blue)}
@@ -1432,9 +1432,98 @@ def models_href(tag=None, stock=None):
     return "/models"
 
 
-def notify_card_image_html(item, alt, placeholder):
+_CATALOG_PRODUCT_CACHE = {"stamp": None, "by_id": {}}
+
+
+def _catalog_products_by_id():
+    from parts_catalog import PARTS_DIR
+
+    path = os.path.join(PARTS_DIR, "products.json")
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        return {}
+    if _CATALOG_PRODUCT_CACHE["stamp"] == stamp:
+        return _CATALOG_PRODUCT_CACHE["by_id"]
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    by_id = {}
+    if isinstance(raw, dict):
+        for key, rec in raw.items():
+            if not isinstance(rec, dict):
+                continue
+            product_id = str(rec.get("id") or key).strip().upper()
+            if product_id:
+                by_id[product_id] = rec
+    _CATALOG_PRODUCT_CACHE["stamp"] = stamp
+    _CATALOG_PRODUCT_CACHE["by_id"] = by_id
+    return by_id
+
+
+# Takara tool products. These are launchers, grips, stadiums, and cases,
+# so the model card uses the official accessory photo instead of a shop listing.
+_ACCESSORY_FACES = {
+    "BX-09": "對戰通行證",
+    "BX-10": "極限對戰盤",
+    "BX-11": "發射器握把",
+    "BX-12": "3on3 陀螺收納盒",
+    "BX-18": "旋風發射器",
+    "BX-25": "陀螺收納盒",
+    "BX-28": "旋風發射器 白色版",
+    "BX-30": "自訂握把 紅色版",
+    "BX-32": "寬版極限對戰盤",
+    "BX-40": "左迴旋拉條發射器 L",
+    "BX-43": "陀螺收納盒 白色版",
+    "BX-47": "左迴旋旋風發射器 L 紅色版",
+    "BX-57": "3on3 陀螺收納盒 黑色版",
+    "BXG-62": "旋風發射器 B4 限定色版",
+}
+_ACCESSORY_IMAGE = "https://beybladehub.app/accessories/raw/%s.webp"
+
+
+def catalog_face_for_model(model):
+    model = str(model or "").strip().upper()
+    if not model:
+        return None
+    accessory = _ACCESSORY_FACES.get(model)
+    if accessory:
+        return {
+            "name": accessory,
+            "image": _ACCESSORY_IMAGE % model,
+            "kind": "accessory",
+        }
+    by_id = _catalog_products_by_id()
+    rec = by_id.get(model)
+    if rec is None:
+        prefix = model + "-"
+        for key in sorted(by_id):
+            if key.startswith(prefix):
+                rec = by_id[key]
+                break
+    if not rec:
+        return None
+    name = str(rec.get("name_zh") or rec.get("name_en") or "").strip()
+    if name.upper().startswith(model):
+        rest = name[len(model):].strip(" -")
+        if rest:
+            name = rest
+    image = ""
+    rel = str(rec.get("image_path") or "").strip()
+    if rel:
+        from catalog_pages import catalog_image_href
+
+        image = catalog_image_href(rel)
+    if not name and not image:
+        return None
+    return {"name": name, "image": image}
+
+
+def notify_card_image_html(item, alt, placeholder, src=""):
     rel = str((item or {}).get("image_path") or "").replace("\\", "/")
-    remote = product_image_url(item)
+    remote = str(src or "").strip() or product_image_url(item)
     cached = ""
     if rel.startswith("images/") and ".." not in rel:
         cached = cdn_image_url("/" + rel)
@@ -1549,7 +1638,8 @@ def model_grid_card_html(group):
         return ""
     primary = items[0]
     model = str(group.get("model") or "")
-    title = str(primary.get("title") or model or primary.get("sku") or "")
+    face = catalog_face_for_model(model) or {}
+    title = str(face.get("name") or primary.get("title") or model or primary.get("sku") or "")
     tag = group_tag_key(group)
     priced = current_price_items(items)
     price_label = listing_price_label(priced)
@@ -1561,7 +1651,7 @@ def model_grid_card_html(group):
         "<p class='catalog-card__subtitle'>%s</p>" % html.escape(price_label) if price_label else ""
     )
     placeholder = model or title or "?"
-    image_html = notify_card_image_html(primary, title, placeholder)
+    image_html = notify_card_image_html(primary, title, placeholder, src=face.get("image") or "")
     body = (
         "<div class='catalog-card__body'>%s<h2 class='catalog-card__name'>%s</h2>%s</div>"
         % (code, html.escape(title), range_html)
