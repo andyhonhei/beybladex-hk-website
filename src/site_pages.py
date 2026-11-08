@@ -5,6 +5,7 @@ from __future__ import print_function
 import html
 import json
 import os
+import re
 import urllib.parse
 from datetime import datetime, timezone
 
@@ -1433,6 +1434,8 @@ def models_href(tag=None, stock=None):
 
 
 _CATALOG_PRODUCT_CACHE = {"stamp": None, "by_id": {}}
+_BROWSER_CATALOG_CACHE = {"stamp": None, "dir": None, "by_model": {}}
+_BROWSER_CODE_RE = re.compile(r"^(BXG|BXH|BXC|BXA|CX|UX|BX)-?(\d{2})(.*)$", re.I)
 
 
 def _catalog_products_by_id():
@@ -1484,10 +1487,107 @@ _ACCESSORY_FACES = {
 _ACCESSORY_IMAGE = "https://beybladehub.app/accessories/raw/%s.webp"
 
 
+def browser_catalog_dir():
+    override = (os.environ.get("BEYBLADE_BROWSER_DATA") or "").strip()
+    if override:
+        return override
+    prod = "/home/ubuntu/beybladex_hk_notify/browser/dist/data"
+    if os.path.isdir(prod):
+        return prod
+    return ""
+
+
+def _browser_model_key(raw):
+    text = str(raw or "").strip().upper()
+    base, sep, rest = text.partition("::")
+    match = _BROWSER_CODE_RE.match(base.replace(" ", ""))
+    if match:
+        base = "%s-%s%s" % (match.group(1).upper(), match.group(2), match.group(3).upper())
+    if not sep:
+        return base
+    return "%s::%s" % (base, rest.lower())
+
+
+def _browser_face_rank(model, kind):
+    if model in _ACCESSORY_FACES and kind in ("stadium", "grip"):
+        return 0
+    return {"set": 1, "package": 2, "stadium": 3, "grip": 3}.get(kind, 4)
+
+
+def _browser_face_name(labels, model):
+    labels = labels or {}
+    text = str(labels.get("zh-HK") or labels.get("en") or "").strip()
+    folded = text.upper()
+    for prefix in (model, model.replace("-", "")):
+        if prefix and folded.startswith(prefix):
+            text = text[len(prefix):].strip(" -")
+            break
+    return text
+
+
+def _load_browser_faces(directory):
+    try:
+        with open(os.path.join(directory, "catalog.json"), encoding="utf-8") as fh:
+            catalog = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    try:
+        with open(os.path.join(directory, "i18n.json"), encoding="utf-8") as fh:
+            i18n = json.load(fh)
+    except (OSError, ValueError):
+        i18n = {}
+    if not isinstance(i18n, dict):
+        i18n = {}
+    best = {}
+    products = catalog.get("products") if isinstance(catalog, dict) else None
+    for rec in products or []:
+        if not isinstance(rec, dict):
+            continue
+        image = str(rec.get("image") or "").strip()
+        if not image.startswith("/browser/assets/"):
+            continue
+        key = _browser_model_key(rec.get("id"))
+        model = key.split("::", 1)[0]
+        if not model:
+            continue
+        rank = _browser_face_rank(model, str(rec.get("kind") or ""))
+        current = best.get(model)
+        if current and current[0] <= rank:
+            continue
+        name = _browser_face_name(i18n.get(rec.get("id")) or i18n.get(key), model)
+        best[model] = (rank, {"name": name, "image": image})
+    return {model: face for model, (_, face) in best.items()}
+
+
+def _browser_catalog_faces():
+    directory = browser_catalog_dir()
+    path = os.path.join(directory, "catalog.json") if directory else ""
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+        directory = ""
+    cached = _BROWSER_CATALOG_CACHE
+    if cached["dir"] == directory and cached["stamp"] == stamp:
+        return cached["by_model"]
+    faces = _load_browser_faces(directory) if directory else {}
+    cached["dir"] = directory
+    cached["stamp"] = stamp
+    cached["by_model"] = faces
+    return faces
+
+
 def catalog_face_for_model(model):
     model = str(model or "").strip().upper()
     if not model:
         return None
+    browser = _browser_catalog_faces().get(model)
+    if browser and browser.get("image"):
+        return {
+            "name": browser.get("name") or model,
+            "image": browser["image"],
+            "kind": "browser",
+        }
     accessory = _ACCESSORY_FACES.get(model)
     if accessory:
         return {

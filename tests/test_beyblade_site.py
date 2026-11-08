@@ -2746,6 +2746,51 @@ class ModelGridTests(unittest.TestCase):
             ]
         )
 
+    def test_model_card_prefers_synced_browser_image_over_shop_cache(self):
+        import site_pages
+
+        with tempfile.TemporaryDirectory() as dest:
+            with open(os.path.join(dest, "catalog.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "products": [
+                            {
+                                "id": "BX-01",
+                                "kind": "set",
+                                "image": "/browser/assets/site__Blade__BX-01.png",
+                            }
+                        ]
+                    },
+                    fh,
+                )
+            with open(os.path.join(dest, "i18n.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {"BX-01": {"zh-HK": "BX-01 翔龍神劍 3-60F", "en": "BX-01 DRANSWORD"}},
+                    fh,
+                )
+            site_pages._BROWSER_CATALOG_CACHE["stamp"] = None
+            with mock.patch.object(site_pages, "browser_catalog_dir", return_value=dest):
+                page = render_models_html(
+                    [
+                        {
+                            "sku": "1",
+                            "shop_id": "moonroadhk",
+                            "title": "BX-01 店名標題",
+                            "model": "BX-01",
+                            "tag": "BX",
+                            "price": "120",
+                            "status": "in_stock",
+                            "image": "https://cdn.example/shop.jpg",
+                            "image_path": "images/moonroadhk/1.jpg",
+                        }
+                    ]
+                )
+        button = page.split("<button type='button' class='catalog-card__hit'", 1)[1].split("</button>", 1)[0]
+        self.assertIn("src='/browser/assets/site__Blade__BX-01.png'", button)
+        self.assertIn("<h2 class='catalog-card__name'>翔龍神劍 3-60F</h2>", button)
+        self.assertNotIn("shop.jpg", button.split("onerror", 1)[0])
+        self.assertNotIn("店名標題", button)
+
     def test_model_card_uses_official_catalog_name_and_image(self):
         import parts_catalog
         import site_pages
