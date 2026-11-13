@@ -3026,6 +3026,33 @@ def _later_stamp(left, right):
     return right if right > left else left
 
 
+OVERSEAS_SHOP_IDS = frozenset(
+    {
+        "amazon",
+        "amazon-jp",
+        "amazon-jp-retail",
+        "biccamera",
+        "yodobashi",
+        "takaratomymall",
+    }
+)
+
+
+def shop_is_overseas(shop, cfg=None):
+    """Japan and other non-Hong Kong shops, kept apart from local stores."""
+    shop = shop or {}
+    sid = str(shop.get("id") or "")
+    if sid in ("", "all"):
+        return False
+    source = find_source_by_id(sid, cfg) or {}
+    region = str(source.get("region") or shop.get("region") or "").strip().lower()
+    if region in ("hk", "hongkong", "hong-kong"):
+        return False
+    if region in ("jp", "japan", "us", "overseas", "non-hk"):
+        return True
+    return sid in OVERSEAS_SHOP_IDS
+
+
 def display_status_shops(shops, cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     groups = []

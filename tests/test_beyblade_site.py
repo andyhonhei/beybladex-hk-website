@@ -249,6 +249,45 @@ class StatusPageTests(unittest.TestCase):
         self.assertNotIn("cms107", admin)
         self.assertNotIn("Website list", page)
         self.assertNotIn("Status live", page)
+        self.assertIn("<h2>香港店舖</h2>", page)
+        self.assertNotIn("<h2>海外店舖</h2>", page)
+
+    def test_shopslist_marks_overseas_stores_in_chinese(self):
+        page = render_shops_html(
+            {
+                "sources": [
+                    {"id": "cuapp", "label": "CU APP", "enabled": True},
+                    {"id": "takaratomymall", "label": "Takara Tomy Mall", "enabled": True},
+                ]
+            },
+            payload={
+                "checked_at": "2026-11-13 21:00:00",
+                "ok": True,
+                "shops": [
+                    {"id": "cuapp", "label": "CU APP", "sku_count": 2, "in_stock": 1, "out_of_stock": 1},
+                    {
+                        "id": "takaratomymall",
+                        "label": "Takara Tomy Mall",
+                        "sku_count": 24,
+                        "in_stock": 16,
+                        "out_of_stock": 8,
+                    },
+                ],
+            },
+            show_updated=True,
+        )
+        self.assertLess(page.find("<h2>香港店舖</h2>"), page.find("CU APP"))
+        self.assertLess(page.find("CU APP"), page.find("<h2>海外店舖</h2>"))
+        self.assertLess(page.find("<h2>海外店舖</h2>"), page.find("Takara Tomy Mall"))
+        self.assertIn("/shopslist", page)
+        chips = shop_chips_html(
+            [
+                {"id": "cuapp", "label": "CU APP"},
+                {"id": "takaratomymall", "label": "Takara Tomy Mall"},
+            ]
+        )
+        self.assertLess(chips.find("CU APP"), chips.find("海外店舖"))
+        self.assertLess(chips.find("海外店舖"), chips.find("Takara Tomy Mall"))
 
     def test_nav_includes_history_button(self):
         nav = site_nav_html()

@@ -49,6 +49,7 @@ from site_data import (
     build_watcher_status,
     cdn_image_url,
     display_status_shops,
+    shop_is_overseas,
     filter_index_notifies,
     filter_notifies_by_src,
     filter_notify_history,
@@ -763,18 +764,22 @@ def status_shop_row_html(shop, show_updated=False):
     return "<tr>%s</tr>" % "".join("<td>%s</td>" % cell for cell in cells)
 
 
-def status_shop_table_body(payload, cfg=None, show_updated=False):
+def status_shop_table_body(payload, cfg=None, show_updated=False, shops=None):
     payload = payload or {}
+    if shops is None:
+        shops = display_status_shops(payload.get("shops") or [], cfg)
     rows = [
         status_shop_row_html(shop, show_updated=show_updated)
-        for shop in display_status_shops(payload.get("shops") or [], cfg)
+        for shop in shops
     ]
     colspan = "6" if show_updated else "5"
     return "\n".join(rows) or ("<tr><td colspan='%s'>沒有商店資料</td></tr>" % colspan)
 
 
-def status_shops_section_html(payload, cfg=None, title_html=None, show_updated=False):
+def status_shops_section_html(payload, cfg=None, title_html=None, show_updated=False, shops=None, show_stats=True):
     payload = payload or {}
+    if shops is None:
+        shops = display_status_shops(payload.get("shops") or [], cfg)
     ok = bool(payload.get("ok"))
     if show_updated and not ok:
         health = "<span class='bad'>異常</span>"
@@ -783,19 +788,24 @@ def status_shops_section_html(payload, cfg=None, title_html=None, show_updated=F
     if title_html is None:
         title_html = '<h2><a href="/shops">店舖現況</a></h2>'
     heading = ("%s\n" % title_html) if title_html else ""
-    updated_stat = ""
-    updated_head = ""
-    if show_updated:
-        updated_stat = "<span>更新 %s HKT</span>" % html.escape(
-            str(payload.get("checked_at") or "—")
-        )
-        updated_head = "<th>最後更新時間</th>"
-    return """<section class="panel">
-%s<div class="stats">
+    stats = ""
+    if show_stats:
+        updated_stat = ""
+        if show_updated:
+            updated_stat = "<span>更新 %s HKT</span>" % html.escape(
+                str(payload.get("checked_at") or "—")
+            )
+        stats = """<div class="stats">
 <span>整體 <strong>%s</strong></span>
 %s
 </div>
-<table>
+""" % (
+            health,
+            updated_stat,
+        )
+    updated_head = "<th>最後更新時間</th>" if show_updated else ""
+    return """<section class="panel">
+%s%s<table>
 <thead><tr><th>商店</th><th>狀態</th><th>SKU</th><th>有貨</th><th>缺貨</th>%s</tr></thead>
 <tbody>
 %s
@@ -804,11 +814,34 @@ def status_shops_section_html(payload, cfg=None, title_html=None, show_updated=F
 </section>
 """ % (
         heading,
-        health,
-        updated_stat,
+        stats,
         updated_head,
-        status_shop_table_body(payload, cfg, show_updated=show_updated),
+        status_shop_table_body(payload, cfg, show_updated=show_updated, shops=shops),
     )
+
+
+def shops_page_sections_html(payload, cfg=None, show_updated=False):
+    payload = payload or {}
+    rows = display_status_shops(payload.get("shops") or [], cfg)
+    hk = [row for row in rows if row.get("id") == "all" or not shop_is_overseas(row, cfg)]
+    overseas = [row for row in rows if row.get("id") != "all" and shop_is_overseas(row, cfg)]
+    html_out = status_shops_section_html(
+        payload,
+        cfg,
+        title_html="<h2>香港店舖</h2>",
+        show_updated=show_updated,
+        shops=hk,
+    )
+    if overseas:
+        html_out += status_shops_section_html(
+            payload,
+            cfg,
+            title_html="<h2>海外店舖</h2>",
+            show_updated=show_updated,
+            shops=overseas,
+            show_stats=False,
+        )
+    return html_out
 
 
 def render_status_html(payload, key_query="", notifies=None, shops=None, show_updated=False, src=""):
@@ -967,7 +1000,7 @@ def render_shops_html(cfg=None, payload=None, show_updated=False):
         ),
         page_theme_css(),
         site_nav_html(),
-        status_shops_section_html(payload, cfg, title_html="", show_updated=show_updated),
+        shops_page_sections_html(payload, cfg, show_updated=show_updated),
         site_footer_html(),
         install_hint_block(),
     )
@@ -2366,19 +2399,57 @@ def filter_options_html(items, wrap_class="filters", combo_label="", force_combo
     return '<div class="filter-store">%s%s</div>' % (heading, combo)
 
 
-def shop_chips_html(shops, current_id=""):
-    current = str(current_id or "")
-    items = [(shop_products_href("all"), "All", current == "all")]
+def _shop_chip_items(shops, current_id, include_all=False):
+    items = []
+    if include_all:
+        items.append((shop_products_href("all"), "All", current_id == "all"))
     for shop in shops or []:
         shop_id = str(shop.get("id") or "")
         items.append(
             (
                 shop_products_href(shop_id),
                 str(shop.get("label") or shop_id or "Shop"),
-                bool(shop_id and shop_id == current),
+                bool(shop_id and shop_id == current_id),
             )
         )
-    return filter_options_html(items, wrap_class="shop-chips", combo_label="Store")
+    return items
+
+
+def shop_chips_html(shops, current_id=""):
+    current = str(current_id or "")
+    hk = []
+    overseas = []
+    for shop in shops or []:
+        if shop_is_overseas(shop):
+            overseas.append(shop)
+        else:
+            hk.append(shop)
+    blocks = []
+    if hk:
+        blocks.append(
+            filter_options_html(
+                _shop_chip_items(hk, current, include_all=True),
+                wrap_class="shop-chips",
+                combo_label="Store",
+            )
+        )
+    if overseas:
+        blocks.append(
+            filter_options_html(
+                _shop_chip_items(overseas, current, include_all=not hk),
+                wrap_class="shop-chips shop-chips-overseas",
+                combo_label="海外店舖",
+            )
+        )
+    if not blocks:
+        blocks.append(
+            filter_options_html(
+                _shop_chip_items([], current, include_all=True),
+                wrap_class="shop-chips",
+                combo_label="Store",
+            )
+        )
+    return "".join(blocks)
 
 
 def render_products_html(shop, items, key_query="", stock_filter="", tag_filter="", shops=None):
