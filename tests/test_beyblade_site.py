@@ -289,6 +289,42 @@ class StatusPageTests(unittest.TestCase):
         self.assertLess(chips.find("CU APP"), chips.find("海外店舖"))
         self.assertLess(chips.find("海外店舖"), chips.find("Takara Tomy Mall"))
 
+    def test_hidden_japan_shops_stay_off_the_public_shop_list(self):
+        cfg = {
+            "sources": [
+                {"id": "takaratomymall", "label": "Takara Tomy Mall", "enabled": True},
+                {
+                    "id": "biccamera",
+                    "label": "Bic Camera",
+                    "enabled": False,
+                    "hidden": True,
+                },
+                {
+                    "id": "yodobashi",
+                    "label": "Yodobashi",
+                    "enabled": False,
+                    "hidden": True,
+                },
+            ]
+        }
+        payload = {
+            "checked_at": "2026-11-15 03:00:00",
+            "ok": True,
+            "shops": [
+                {"id": "takaratomymall", "label": "Takara Tomy Mall", "sku_count": 2},
+                {"id": "biccamera", "label": "Bic Camera", "sku_count": 3},
+                {"id": "yodobashi", "label": "Yodobashi", "sku_count": 4},
+            ],
+        }
+        rows = display_status_shops(payload["shops"], cfg)
+        self.assertEqual([row["id"] for row in rows], ["all", "takaratomymall"])
+        self.assertIsNone(shop_page_meta("biccamera", cfg))
+        self.assertIsNone(shop_page_meta("yodobashi", cfg))
+        page = render_shops_html(cfg, payload, show_updated=True)
+        self.assertIn("Takara Tomy Mall", page)
+        self.assertNotIn("Bic Camera", page)
+        self.assertNotIn("Yodobashi", page)
+
     def test_nav_includes_history_button(self):
         nav = site_nav_html()
         self.assertIn('id="site-nav-drawer"', nav)

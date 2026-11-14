@@ -2850,6 +2850,10 @@ def mysql_ok_cached(now=time.time):
     return ok
 
 
+def source_is_hidden(source):
+    return bool((source or {}).get("hidden"))
+
+
 def build_watcher_status(cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     errors = load_error_state()
@@ -2859,6 +2863,8 @@ def build_watcher_status(cfg=None):
     if mysql_ok is False:
         ok = False
     for source in cfg.get("sources") or []:
+        if source_is_hidden(source):
+            continue
         label = source.get("label") or source.get("id") or "shop"
         rel = source.get("state") or ("%s_seen_skus.json" % (source.get("id") or "source"))
         path = state_file_path(rel)
@@ -2991,12 +2997,20 @@ def sources_for_shop_page(shop_id, cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     sources = list((cfg or {}).get("sources") or [])
     if shop_id == "all":
-        return [source for source in sources if source.get("enabled", True)]
+        return [
+            source
+            for source in sources
+            if source.get("enabled", True) and not source_is_hidden(source)
+        ]
     source = find_source_by_id(shop_id, cfg)
-    if not source:
+    if not source or source_is_hidden(source):
         return []
     key = site_group_key(source)
-    return [item for item in sources if site_group_key(item) == key]
+    return [
+        item
+        for item in sources
+        if site_group_key(item) == key and not source_is_hidden(item)
+    ]
 
 
 def shop_page_meta(shop_id, cfg=None):
@@ -3065,6 +3079,8 @@ def display_status_shops(shops, cfg=None):
         if (shop.get("id") or "") == "all":
             continue
         source = find_source_by_id(shop.get("id"), cfg) or {}
+        if source_is_hidden(source) or shop.get("hidden"):
+            continue
         key = site_group_key(source) or shop.get("id") or shop.get("label")
         existing = by_key.get(key)
         if existing is None:
@@ -3307,7 +3323,7 @@ def shop_chip_shops(cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     shops = []
     for source in (cfg or {}).get("sources") or []:
-        if not source.get("enabled", True):
+        if not source.get("enabled", True) or source_is_hidden(source):
             continue
         shops.append(
             {
