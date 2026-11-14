@@ -2978,6 +2978,9 @@ def find_source_by_id(shop_id, cfg=None):
 
 
 def site_group_key(source):
+    sid = str((source or {}).get("id") or "")
+    if sid in ("amazon-jp-retail", "amazon-us-retail"):
+        return sid
     origin = str((source or {}).get("origin") or "").strip().rstrip("/").lower()
     if origin:
         return origin
@@ -3031,6 +3034,7 @@ OVERSEAS_SHOP_IDS = frozenset(
         "amazon",
         "amazon-jp",
         "amazon-jp-retail",
+        "amazon-us-retail",
         "biccamera",
         "yodobashi",
         "takaratomymall",
