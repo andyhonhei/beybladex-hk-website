@@ -354,8 +354,9 @@ class StatusPageTests(unittest.TestCase):
         self.assertNotIn("/shop/1999jp", public)
         self.assertIn("1999.jp", admin)
         self.assertIn("/shopslist", admin)
-        self.assertNotIn("/shop/1999jp", admin)
-        self.assertIsNone(shop_page_meta("1999jp", cfg))
+        self.assertIn("/shop/1999jp", admin)
+        self.assertEqual(shop_page_meta("1999jp", cfg)["label"], "1999.jp")
+        self.assertIn("1999jp", [row["id"] for row in shop_chip_shops(cfg)])
 
     def test_nav_includes_history_button(self):
         nav = site_nav_html()

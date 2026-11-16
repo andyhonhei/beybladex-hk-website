@@ -725,7 +725,7 @@ def shop_stock_count_cell(shop, kind):
         n = int(count)
     except (TypeError, ValueError):
         return text
-    if n <= 0 or shop.get("test"):
+    if n <= 0:
         return text
     href = shop_products_href(shop.get("id"), kind)
     return "<a href='%s'>%s</a>" % (html.escape(href, quote=True), text)
@@ -748,11 +748,8 @@ def status_shop_row_html(shop, show_updated=False):
     else:
         state = label
     label = html.escape(str(shop.get("label") or ""))
-    if shop.get("test"):
-        name_cell = label
-    else:
-        href = shop_products_href(shop.get("id"))
-        name_cell = "<a href='%s'>%s</a>" % (html.escape(href, quote=True), label)
+    href = shop_products_href(shop.get("id"))
+    name_cell = "<a href='%s'>%s</a>" % (html.escape(href, quote=True), label)
     cells = [
         name_cell,
         state,

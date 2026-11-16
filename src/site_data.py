@@ -2855,14 +2855,19 @@ def source_is_hidden(source):
 
 
 def source_is_test(source):
-    """Watched and listed on /shopslist only. Kept off public shops and product pages."""
+    """Kept off the public /shops list. Still listed on /product and /shopslist."""
     return bool((source or {}).get("test"))
 
 
-def source_is_public(source):
-    """Shown on public shop chips and product pages. Test shops stay on /shopslist."""
+def source_is_listed(source):
+    """Shown on /product, including test shops that stay off /shops."""
     source = source or {}
-    return bool(source.get("enabled", True) and not source_is_hidden(source) and not source_is_test(source))
+    return bool(source.get("enabled", True) and not source_is_hidden(source))
+
+
+def source_is_public(source):
+    """Shown on the public /shops status page. Test shops stay on /shopslist."""
+    return source_is_listed(source) and not source_is_test(source)
 
 
 def build_watcher_status(cfg=None):
@@ -3008,16 +3013,12 @@ def sources_for_shop_page(shop_id, cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     sources = list((cfg or {}).get("sources") or [])
     if shop_id == "all":
-        return [source for source in sources if source_is_public(source)]
+        return [source for source in sources if source_is_listed(source)]
     source = find_source_by_id(shop_id, cfg)
-    if not source or source_is_hidden(source) or source_is_test(source):
+    if not source_is_listed(source):
         return []
     key = site_group_key(source)
-    return [
-        item
-        for item in sources
-        if site_group_key(item) == key and not source_is_hidden(item) and not source_is_test(item)
-    ]
+    return [item for item in sources if site_group_key(item) == key and source_is_listed(item)]
 
 
 def shop_page_meta(shop_id, cfg=None):
@@ -3335,7 +3336,7 @@ def shop_chip_shops(cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     shops = []
     for source in (cfg or {}).get("sources") or []:
-        if not source_is_public(source):
+        if not source_is_listed(source):
             continue
         shops.append(
             {
@@ -3347,7 +3348,7 @@ def shop_chip_shops(cfg=None):
                 "enabled": True,
             }
         )
-    return [row for row in display_status_shops(shops, cfg) if row.get("id") != "all"]
+    return [row for row in display_status_shops(shops, cfg, include_test=True) if row.get("id") != "all"]
 
 
 def go_page_target(shop_id, sku, items=None):
