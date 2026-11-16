@@ -2854,6 +2854,17 @@ def source_is_hidden(source):
     return bool((source or {}).get("hidden"))
 
 
+def source_is_test(source):
+    """Watched and listed on /shopslist only. Kept off public shops and product pages."""
+    return bool((source or {}).get("test"))
+
+
+def source_is_public(source):
+    """Shown on public shop chips and product pages. Test shops stay on /shopslist."""
+    source = source or {}
+    return bool(source.get("enabled", True) and not source_is_hidden(source) and not source_is_test(source))
+
+
 def build_watcher_status(cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     errors = load_error_state()
@@ -2997,19 +3008,15 @@ def sources_for_shop_page(shop_id, cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     sources = list((cfg or {}).get("sources") or [])
     if shop_id == "all":
-        return [
-            source
-            for source in sources
-            if source.get("enabled", True) and not source_is_hidden(source)
-        ]
+        return [source for source in sources if source_is_public(source)]
     source = find_source_by_id(shop_id, cfg)
-    if not source or source_is_hidden(source):
+    if not source or source_is_hidden(source) or source_is_test(source):
         return []
     key = site_group_key(source)
     return [
         item
         for item in sources
-        if site_group_key(item) == key and not source_is_hidden(item)
+        if site_group_key(item) == key and not source_is_hidden(item) and not source_is_test(item)
     ]
 
 
@@ -3052,6 +3059,7 @@ OVERSEAS_SHOP_IDS = frozenset(
         "biccamera",
         "yodobashi",
         "takaratomymall",
+        "1999jp",
     }
 )
 
@@ -3071,7 +3079,7 @@ def shop_is_overseas(shop, cfg=None):
     return sid in OVERSEAS_SHOP_IDS
 
 
-def display_status_shops(shops, cfg=None):
+def display_status_shops(shops, cfg=None, include_test=False):
     cfg = cfg if cfg is not None else CONFIG
     groups = []
     by_key = {}
@@ -3081,10 +3089,14 @@ def display_status_shops(shops, cfg=None):
         source = find_source_by_id(shop.get("id"), cfg) or {}
         if source_is_hidden(source) or shop.get("hidden"):
             continue
+        if source_is_test(source) and not include_test:
+            continue
         key = site_group_key(source) or shop.get("id") or shop.get("label")
         existing = by_key.get(key)
         if existing is None:
             row = dict(shop)
+            if source_is_test(source):
+                row["test"] = True
             grouped = sources_for_shop_page(shop.get("id"), cfg)
             first = grouped[0] if grouped else source
             if first.get("id"):
@@ -3323,7 +3335,7 @@ def shop_chip_shops(cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     shops = []
     for source in (cfg or {}).get("sources") or []:
-        if not source.get("enabled", True) or source_is_hidden(source):
+        if not source_is_public(source):
             continue
         shops.append(
             {

@@ -725,7 +725,7 @@ def shop_stock_count_cell(shop, kind):
         n = int(count)
     except (TypeError, ValueError):
         return text
-    if n <= 0:
+    if n <= 0 or shop.get("test"):
         return text
     href = shop_products_href(shop.get("id"), kind)
     return "<a href='%s'>%s</a>" % (html.escape(href, quote=True), text)
@@ -747,11 +747,12 @@ def status_shop_row_html(shop, show_updated=False):
         )
     else:
         state = label
-    href = shop_products_href(shop.get("id"))
-    name_cell = "<a href='%s'>%s</a>" % (
-        html.escape(href, quote=True),
-        html.escape(str(shop.get("label") or "")),
-    )
+    label = html.escape(str(shop.get("label") or ""))
+    if shop.get("test"):
+        name_cell = label
+    else:
+        href = shop_products_href(shop.get("id"))
+        name_cell = "<a href='%s'>%s</a>" % (html.escape(href, quote=True), label)
     cells = [
         name_cell,
         state,
@@ -822,7 +823,9 @@ def status_shops_section_html(payload, cfg=None, title_html=None, show_updated=F
 
 def shops_page_sections_html(payload, cfg=None, show_updated=False):
     payload = payload or {}
-    rows = display_status_shops(payload.get("shops") or [], cfg)
+    rows = display_status_shops(
+        payload.get("shops") or [], cfg, include_test=show_updated
+    )
     hk = [row for row in rows if row.get("id") == "all" or not shop_is_overseas(row, cfg)]
     overseas = [row for row in rows if row.get("id") != "all" and shop_is_overseas(row, cfg)]
     html_out = status_shops_section_html(

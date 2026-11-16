@@ -325,6 +325,38 @@ class StatusPageTests(unittest.TestCase):
         self.assertNotIn("Bic Camera", page)
         self.assertNotIn("Yodobashi", page)
 
+    def test_test_shop_shows_only_on_shopslist(self):
+        cfg = {
+            "sources": [
+                {"id": "cuapp", "label": "CU APP", "enabled": True},
+                {
+                    "id": "1999jp",
+                    "label": "1999.jp",
+                    "origin": "https://www.1999.co.jp",
+                    "region": "jp",
+                    "enabled": True,
+                    "test": True,
+                },
+            ]
+        }
+        payload = {
+            "checked_at": "2026-11-15 03:00:00",
+            "ok": True,
+            "shops": [
+                {"id": "cuapp", "label": "CU APP", "sku_count": 2, "in_stock": 1, "out_of_stock": 1},
+                {"id": "1999jp", "label": "1999.jp", "sku_count": 4, "in_stock": 1, "out_of_stock": 3},
+            ],
+        }
+        public = render_shops_html(cfg, payload, show_updated=False)
+        admin = render_shops_html(cfg, payload, show_updated=True)
+        self.assertIn("CU APP", public)
+        self.assertNotIn("1999.jp", public)
+        self.assertNotIn("/shop/1999jp", public)
+        self.assertIn("1999.jp", admin)
+        self.assertIn("/shopslist", admin)
+        self.assertNotIn("/shop/1999jp", admin)
+        self.assertIsNone(shop_page_meta("1999jp", cfg))
+
     def test_nav_includes_history_button(self):
         nav = site_nav_html()
         self.assertIn('id="site-nav-drawer"', nav)
