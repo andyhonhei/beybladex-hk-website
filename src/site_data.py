@@ -58,8 +58,17 @@ NOTIFY_HISTORY_PATH = os.path.join(DATA_DIR, "notify_history.jsonl")
 CONFIG = {}
 DISCORD_INVITE_URL = "https://discord.gg/C8Q5gZf3y5"
 TELEGRAM_INVITE_URL = "https://t.me/+mbTPVeGFBalhMjQ9"
-THREADS_PROFILE_URL = "https://discord.gg/C8Q5gZf3y5"
+THREADS_PROFILE_URL = "https://www.threads.com/@hkbeybladex_com"
 THREADS_SUBSCRIBE_DESC = "香港爆旋陀螺到貨通知。Online舖頭 有新品、補貨、缺貨就出帖。非官方。"
+SITE_META_DESCRIPTION = (
+    "24小時自動監控香港各大網店及官方渠道（HobbyDigi、BuyMarketToy、MoonroadHK、Takara Tomy Mall等）"
+    "爆旋陀螺 X 現貨與開訂狀態。即時接收 Telegram、Discord 及 Threads 補貨通知，與香港陀螺手交流情報！"
+)
+SITE_META_KEYWORDS = (
+    "beybladex, 爆旋陀螺, 爆旋陀螺 X, Beyblade X 香港, 爆旋陀螺補貨, 爆旋陀螺現貨, "
+    "爆旋陀螺開訂, HK BeybladeX Watch, Takara Tomy 香港, 陀螺社群, Beyblade X restock HK, "
+    "beyblade x, 陀螺, 戰鬥陀螺, hkbeybladex"
+)
 THREADS_SUBSCRIBE_HINT = "Follow 我哋 Threads 之後記得撳右上角訂閱／鐘仔掣，訂閱帖文通知"
 SUBSCRIBE_BUTTON_LABEL = "訂閱通知"
 PAYME_URL = "https://payme.hsbc/andyhuihh"
@@ -402,7 +411,7 @@ def go_shop_landing_id(path):
 
 
 def home_seo_description():
-    return THREADS_SUBSCRIBE_DESC + " 可經 Threads、Discord、Telegram 收通知。"
+    return SITE_META_DESCRIPTION
 
 
 def home_seo_go_target(shop_id=GO_HOME_SEO_SHOP):
@@ -500,6 +509,111 @@ def go_request_url(path, query=""):
     return url
 
 
+def _own_site_host(host):
+    host = str(host or "").lower().rstrip(".")
+    if not host:
+        return False
+    return (
+        host == "hkbeybladex.com"
+        or host.endswith(".hkbeybladex.com")
+        or host == "andyhhh.com"
+        or host.endswith(".andyhhh.com")
+    )
+
+
+def external_http_url(url):
+    text = str(url or "").strip()
+    parsed = urllib.parse.urlparse(text)
+    if parsed.scheme not in ("http", "https"):
+        return ""
+    if parsed.username or parsed.password or not parsed.hostname:
+        return ""
+    if _own_site_host(parsed.hostname):
+        return ""
+    return text
+
+
+def explore_href(url):
+    dest = external_http_url(url)
+    if not dest:
+        return str(url or "")
+    return "/explore/?url=" + urllib.parse.quote(dest, safe="")
+
+
+def explore_target_url(query):
+    raw = ""
+    for key, val in urllib.parse.parse_qsl(str(query or ""), keep_blank_values=True):
+        if key == "url":
+            raw = val
+            break
+    return external_http_url(raw)
+
+
+def explore_fallback_target(url):
+    host = urllib.parse.urlparse(url).hostname or url
+    image = seo_image_url()
+    return {
+        "title": host,
+        "dest": url,
+        "image": image,
+        "og_image": image,
+        "price": "",
+        "status": "",
+        "description": "即將前往 %s" % host,
+    }
+
+
+def explore_target_from_url(url, items=None):
+    want = str(url or "").strip()
+    if not want:
+        return None
+    if items is None:
+        rows = []
+        for source in (CONFIG or {}).get("sources") or []:
+            if not source.get("enabled", True):
+                continue
+            sid = str(source.get("id") or "")
+            for item in load_shop_products_for_source(source):
+                row = dict(item)
+                row["shop_id"] = sid
+                rows.append(row)
+    else:
+        rows = items
+    for item in rows or []:
+        candidate = str((item or {}).get("url") or product_url(item) or "").strip()
+        if candidate != want:
+            continue
+        found = go_target_from_item(item, (item or {}).get("shop_id") or "")
+        if found:
+            return found
+    return None
+
+
+def explore_page_url(dest):
+    return SITE_ORIGIN + explore_href(dest)
+
+
+def explore_http_result(query="", user_agent="", items=None):
+    dest = explore_target_url(query)
+    if not dest:
+        return {"status": 404}
+    target = explore_target_from_url(dest, items=items) or explore_fallback_target(dest)
+    page_url = explore_page_url(dest)
+    from site_pages import render_go_bounce_html, render_go_html
+
+    crawler = is_preview_crawler(user_agent)
+    return {
+        "status": 200,
+        "html": (
+            render_go_html(target, "explore", "out", page_url=page_url)
+            if crawler
+            else render_go_bounce_html(target, "explore", "out", page_url=page_url)
+        ),
+        "location": target["dest"],
+        "cache": "private, no-store",
+    }
+
+
 def go_http_result(path, query="", cookie="", remember=False, force_store=False, skip_path=None, user_agent=""):
     landing = go_shop_landing_id(path)
     if landing:
@@ -522,11 +636,11 @@ def go_http_result(path, query="", cookie="", remember=False, force_store=False,
         cache_product_image(shop_id, item, prefetch=True)
         target = dict(target)
         target["og_image"] = go_og_image_url(item, shop_id)
-    # Browsers get the loading hop. Preview crawlers get the SEO card and do not
-    # redirect, so the link preview stays on this page. Cloudflare does not vary
-    # /go on User-Agent, so this response must not be stored at the edge.
-    # pv=2 on notify links is unchanged; Telegram still keys its own preview cache
-    # by the full URL.
+    # Browsers see a loading hop for 0.5s, then leave for the shop. Preview
+    # crawlers get the product card and do not redirect, so the link preview
+    # stays on this page. Cloudflare does not vary /go on User-Agent, so this
+    # response must not be stored at the edge. pv=2 on notify links is unchanged;
+    # Telegram still keys its own preview cache by the full URL.
     del remember, force_store
     crawler = is_preview_crawler(user_agent)
     page_url = go_request_url(path, query)
@@ -618,9 +732,42 @@ def product_image_fetch_urls(item):
     large = shopline_og_image_url(orig)
     urls = []
     for url in (large, orig):
-        if url and url not in urls:
+        if url and url not in urls and not _site_brand_image_url(url):
             urls.append(url)
     return urls
+
+
+def _site_brand_image_url(url):
+    path = urllib.parse.urlparse(str(url or "").strip()).path
+    return path in (
+        "/og-card.jpg",
+        "/seo-image.png",
+        "/logo.png",
+        "/logo-on-light.png",
+        "/alipayhk.jpg",
+    )
+
+
+def _amazon_media_image_url(url):
+    host = urllib.parse.urlparse(str(url or "").strip()).netloc.lower()
+    return host.endswith("media-amazon.com") or host.endswith("images-amazon.com")
+
+
+def _amazon_cached_image_needs_refresh(src_path, urls):
+    """Replace a file saved before the product photo was known.
+
+    A preview crawler used to cache the site card when Amazon had no image.
+    """
+    if not urls or not _amazon_media_image_url(urls[0]):
+        return False
+    previous = ""
+    if os.path.isfile(src_path):
+        try:
+            with open(src_path, "r", encoding="utf-8") as fh:
+                previous = fh.read().strip()
+        except OSError:
+            previous = ""
+    return previous != urls[0]
 
 
 def shrink_image_bytes(data, max_px=IMAGE_MAX_PX):
@@ -648,11 +795,12 @@ def cache_product_image(shop_id, item, prefetch=False, pause=0):
     item = item or {}
     rel = product_image_path(shop_id, item.get("sku") or item.get("link"))
     dest = os.path.join(image_data_dir(), rel)
+    src_note = dest + ".src"
     has_file = os.path.isfile(dest) and os.path.getsize(dest) >= IMAGE_MIN_CACHE_BYTES
-    if has_file:
+    urls = product_image_fetch_urls(item)
+    if has_file and not _amazon_cached_image_needs_refresh(src_note, urls):
         item["image_path"] = rel
         return rel
-    urls = product_image_fetch_urls(item)
     if not urls or not prefetch:
         return item.get("image_path") or ""
     last_exc = None
@@ -672,6 +820,9 @@ def cache_product_image(shop_id, item, prefetch=False, pause=0):
             with open(tmp, "wb") as fh:
                 fh.write(body)
             os.replace(tmp, dest)
+            if _amazon_media_image_url(url):
+                with open(src_note, "w", encoding="utf-8") as fh:
+                    fh.write(url)
             item["image_path"] = rel
             if not item.get("image"):
                 item["image"] = url
@@ -958,6 +1109,10 @@ def _money_text(raw):
 
 
 def _price_number(raw):
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
     text = _money_text(raw)
     try:
         return float(text)
@@ -985,11 +1140,208 @@ def price_drop_parts(prev_price, price):
     return format_money_amount(delta), ("%g" % pct)
 
 
+JPY_SHOP_IDS = frozenset(("biccamera", "yodobashi", "takaratomymall", "1999jp"))
+USD_SHOP_IDS = frozenset(("amazon-us-retail", "amazon_us_retail"))
+AMAZON_JP_RETAIL_IDS = frozenset(("amazon-jp-retail", "amazon_jp_retail"))
+_FX_HKD_FALLBACK = {"JPY": 0.052, "USD": 7.8}
+_FX_HKD_CACHE = {}
+_JPY_HKD_FALLBACK = _FX_HKD_FALLBACK["JPY"]
+
+
+def item_uses_jpy(item, shop_id=""):
+    item = item or {}
+    code = str(item.get("currency") or "").strip().upper()
+    if code == "JPY":
+        return True
+    if code:
+        return False
+    sid = str(item.get("shop_id") or shop_id or "")
+    if sid in JPY_SHOP_IDS:
+        return True
+    price = str(item.get("price") or "")
+    return ("円" in price) or ("¥" in price) or ("￥" in price)
+
+
+def fx_hkd_rate(code):
+    """Foreign currency to Hong Kong dollars. Cached for six hours."""
+    code = str(code or "").strip().upper()
+    now = time.time()
+    slot = _FX_HKD_CACHE.setdefault(code, {"rate": None, "at": 0.0})
+    cached = slot.get("rate")
+    if cached and now - float(slot.get("at") or 0) < 6 * 3600:
+        return cached
+    try:
+        req = urllib.request.Request(
+            "https://api.frankfurter.app/latest?from=%s&to=HKD" % urllib.parse.quote(code),
+            headers={"User-Agent": "hkbeybladex-price/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        rate = float((payload.get("rates") or {}).get("HKD") or 0)
+        if rate > 0:
+            slot["rate"] = rate
+            slot["at"] = now
+            return rate
+    except Exception:
+        pass
+    if cached:
+        return cached
+    return _FX_HKD_FALLBACK.get(code) or 0
+
+
+def jpy_hkd_rate():
+    """Yen to Hong Kong dollars. Cached for six hours, with a fixed fallback."""
+    return fx_hkd_rate("JPY")
+
+
+def _shop_token(item, shop_id=""):
+    item = item or {}
+    return str(item.get("shop_id") or shop_id or item.get("shop") or "")
+
+
+def amazon_jp_retail_price(item, shop_id=""):
+    """Amazon.co.jp 直販 prices use JPY¥, not the other yen shops' ¥ prefix."""
+    item = item or {}
+    sid = _shop_token(item, shop_id)
+    if sid in AMAZON_JP_RETAIL_IDS:
+        return True
+    if sid in JPY_SHOP_IDS or sid in USD_SHOP_IDS:
+        return False
+    blob = " ".join(
+        str(item.get(key) or "")
+        for key in ("origin", "url", "link", "shop", "shop_id")
+    )
+    low = blob.lower()
+    if "amazon.com" in low:
+        return False
+    return "amazon.co.jp" in low or "Amazon.co.jp 直販" in blob
+
+
+def item_currency_code(item, shop_id=""):
+    item = item or {}
+    code = str(item.get("currency") or "").strip().upper()
+    if code in ("USD", "JPY", "HKD"):
+        return code
+    sid = _shop_token(item, shop_id)
+    if amazon_jp_retail_price(item, shop_id):
+        return "JPY"
+    if sid in USD_SHOP_IDS:
+        return "USD"
+    blob = " ".join(
+        str(item.get(key) or "")
+        for key in ("origin", "url", "link", "shop", "shop_id")
+    ).lower()
+    if "amazon.com" in blob:
+        return "USD"
+    if sid in AMAZON_JP_RETAIL_IDS or sid in JPY_SHOP_IDS or item_uses_jpy(item, shop_id):
+        return "JPY"
+    return "HKD"
+
+
+def jpy_to_hkd(yen):
+    try:
+        amount = float(yen)
+    except (TypeError, ValueError):
+        return None
+    rate = jpy_hkd_rate()
+    if not rate:
+        return None
+    return int(round(amount * rate))
+
+
+def format_yen_with_hkd(raw):
+    number = _price_number(raw)
+    if number is None:
+        return str(raw or "").strip()
+    yen = "¥%s" % format(int(round(number)), ",")
+    hkd = jpy_to_hkd(number)
+    if hkd is None:
+        return yen
+    return "%s（約 HK$%d）" % (yen, hkd)
+
+
+def usd_to_hkd(dollars):
+    try:
+        amount = float(dollars)
+    except (TypeError, ValueError):
+        return None
+    rate = fx_hkd_rate("USD")
+    if not rate:
+        return None
+    return int(round(amount * rate))
+
+
+def _foreign_amount_with_hkd(raw, prefix, code):
+    number = _price_number(raw)
+    if number is None:
+        return str(raw or "").strip()
+    shown = "%s%s" % (prefix, format_money_amount(number))
+    rate = fx_hkd_rate(code)
+    if not rate:
+        return shown
+    return "%s（約 HK$%d）" % (shown, int(round(number * rate)))
+
+
+def format_jpy_retail_with_hkd(raw):
+    return _foreign_amount_with_hkd(raw, "JPY¥", "JPY")
+
+
+def format_usd_with_hkd(raw):
+    """US dollars plus the Hong Kong dollar estimate."""
+    return _foreign_amount_with_hkd(raw, "US$", "USD")
+
+
+def shown_price_text(item, shop_id=""):
+    item = item or {}
+    price = item.get("price")
+    if not price:
+        return ""
+    priced = dict(item)
+    if shop_id and not priced.get("shop_id"):
+        priced["shop_id"] = shop_id
+    code = item_currency_code(priced, shop_id)
+    if code == "USD":
+        return format_usd_with_hkd(price)
+    if code == "JPY" and amazon_jp_retail_price(priced, shop_id):
+        return format_jpy_retail_with_hkd(price)
+    if code == "JPY":
+        return format_yen_with_hkd(price)
+    text = str(price).strip()
+    if text.upper().startswith("HK"):
+        return text
+    return "HK$%s" % text
+
+
 def price_value_text(item):
     item = item or {}
     price = item.get("price")
     if not price:
         return "—"
+    code = item_currency_code(item)
+    if code == "JPY" and amazon_jp_retail_price(item):
+        base = format_jpy_retail_with_hkd(price)
+        parts = price_drop_parts(item.get("prev_price"), price)
+        if not parts:
+            return base
+        amount, pct = parts
+        previous = format_jpy_retail_with_hkd(item.get("prev_price")).split("（", 1)[0]
+        return "%s → %s（↓ JPY¥%s / %s%%）" % (previous, base, amount, pct)
+    if code == "JPY":
+        base = format_yen_with_hkd(price)
+        parts = price_drop_parts(item.get("prev_price"), price)
+        if not parts:
+            return base
+        amount, pct = parts
+        previous = format_yen_with_hkd(item.get("prev_price")).split("（", 1)[0]
+        return "%s → %s（↓ ¥%s / %s%%）" % (previous, base, amount, pct)
+    if code == "USD":
+        base = format_usd_with_hkd(price)
+        parts = price_drop_parts(item.get("prev_price"), price)
+        if not parts:
+            return base
+        amount, pct = parts
+        previous = format_usd_with_hkd(item.get("prev_price")).split("（", 1)[0]
+        return "%s → %s（↓ US$%s / %s%%）" % (previous, base, amount, pct)
     base = "HK$%s" % price
     parts = price_drop_parts(item.get("prev_price"), price)
     if not parts:
@@ -1124,6 +1476,10 @@ _ALIAS_PART_AS_CODE = {
     ("GRIEVOUS", "3-80HN"): ("BXA-05", "BX"),
     ("CHEWBACCA", "4-80LF"): ("BXA-06", "BX"),
     ("TROOPER", "5-70B"): ("BXA-06", "BX"),
+    ("AERO", "3-70A"): ("BXH-10", "UX"),
+}
+_COMPOSITE_AS_CODE = {
+    "UX-00:AERO:3-70A": ("BXH-10", "UX"),
 }
 _BLACK_VARIANT_RE = re.compile(r"黑色|黑版|(?<![A-Za-z])black(?![A-Za-z])", re.I)
 _KUJI_RE = re.compile(r"一番賞|一番くじ|くじ|(?<![A-Za-z])kuji|dmm\s*scratch", re.I)
@@ -1162,8 +1518,20 @@ _NAME_ALIASES = (
 )
 
 
+def _apply_composite(fields):
+    if not fields:
+        return fields
+    hit = _COMPOSITE_AS_CODE.get(str(fields.get("model") or "").upper())
+    if not hit:
+        return fields
+    return {"model": hit[0], "tag": hit[1]}
+
+
 def _canonical_model_code(code):
     code = re.sub(r"\s+", "", (code or "").upper())
+    composite = _COMPOSITE_AS_CODE.get(code)
+    if composite:
+        return composite[0]
     promo = re.fullmatch(r"(BXG|BXH|BXC|BXA)-?(\d{2})(?:-?(\d{2}))?", code)
     if not promo:
         return code
@@ -1173,13 +1541,40 @@ def _canonical_model_code(code):
     return rewritten[0] if rewritten else normalized
 
 
-def _specific_line_code(text):
+def _normalize_specific_code(raw):
+    code = re.sub(r"\s+", "", (raw or "").upper())
+    code = re.sub(r"^(CX|BX|UX)(?=\d)", r"\1-", code)
+    return _canonical_model_code(code)
+
+
+def _model_code_sort_key(code):
+    match = re.match(r"^([A-Z]+)-(\d+)(.*)$", code or "")
+    if not match:
+        return (9, code or "", 0, "")
+    return (match.group(1), int(match.group(2)), match.group(3))
+
+
+def specific_model_codes(text):
+    """Distinct BX/CX/UX model codes in a product name, in line order."""
+    found = []
     for match in _SPECIFIC_CODE_RE.finditer(text or ""):
-        code = _canonical_model_code(match.group(1))
-        if re.search(r"-?00$", code):
+        code = _normalize_specific_code(match.group(1))
+        if not code or re.search(r"-?00$", code) or code in found:
             continue
-        return code
-    return ""
+        found.append(code)
+    return found
+
+
+def combined_model_code(codes):
+    ordered = sorted([code for code in (codes or []) if code], key=_model_code_sort_key)
+    if len(ordered) < 2:
+        return ""
+    return "+".join(ordered)
+
+
+def _specific_line_code(text):
+    codes = specific_model_codes(text)
+    return codes[0] if codes else ""
 
 
 def _part_codes(text):
@@ -1291,16 +1686,16 @@ def _umbrella_fields(text):
     part = _part_code(text)
     resolved = _resolve_alias(text)
     if resolved:
-        return resolved
+        return _apply_composite(resolved)
     if alias:
         model = "%s-00:%s" % (line, alias)
         if part:
             model = "%s:%s" % (model, part)
-        return {"model": model, "tag": line}
+        return _apply_composite({"model": model, "tag": line})
     variant = _fold_variant(text)
     if not variant:
         variant = "UNKNOWN"
-    return {"model": "%s-00:%s" % (line, variant), "tag": line}
+    return _apply_composite({"model": "%s-00:%s" % (line, variant), "tag": line})
 
 
 def classify_product_line(text):
@@ -1324,6 +1719,8 @@ def classify_product_line(text):
 
 def product_line_fields(item):
     item = item or {}
+    if skips_line_model(item):
+        return {"model": "", "tag": "other"}
     title = " ".join(str(item.get(key) or "") for key in ("title", "name"))
     sku = str(item.get("sku") or "")
     fields = classify_product_line(title)
@@ -2850,26 +3247,6 @@ def mysql_ok_cached(now=time.time):
     return ok
 
 
-def source_is_hidden(source):
-    return bool((source or {}).get("hidden"))
-
-
-def source_is_test(source):
-    """Kept off the public /shops list. Still listed on /product and /shopslist."""
-    return bool((source or {}).get("test"))
-
-
-def source_is_listed(source):
-    """Shown on /product, including test shops that stay off /shops."""
-    source = source or {}
-    return bool(source.get("enabled", True) and not source_is_hidden(source))
-
-
-def source_is_public(source):
-    """Shown on the public /shops status page. Test shops stay on /shopslist."""
-    return source_is_listed(source) and not source_is_test(source)
-
-
 def build_watcher_status(cfg=None):
     cfg = cfg if cfg is not None else CONFIG
     errors = load_error_state()
@@ -2920,7 +3297,7 @@ def status_request_redirect(path):
     dest_path = parsed.path or "/"
     if dest_path in ("/in-stock", "/instock"):
         extra = [(key, val) for key, val in kept if key != "stock"]
-        dest = shop_products_href("all", "in_stock")
+        dest = "/shop/all?stock=in"
         if extra:
             dest += "&" + urllib.parse.urlencode(extra)
         return dest
@@ -2929,6 +3306,24 @@ def status_request_redirect(path):
     dest = dest_path
     if kept:
         dest += "?" + urllib.parse.urlencode(kept)
+    return dest
+
+
+def product_path_redirect(path):
+    """Permanent move from the old model gallery paths to /product/."""
+    parsed = urllib.parse.urlparse(path or "")
+    raw = parsed.path or "/"
+    trimmed = raw.rstrip("/") or "/"
+    if trimmed in ("/models", "/model"):
+        dest = "/product"
+    elif raw.startswith("/models/"):
+        dest = "/product/" + raw[len("/models/") :]
+    elif raw.startswith("/model/"):
+        dest = "/product/" + raw[len("/model/") :]
+    else:
+        return None
+    if parsed.query:
+        dest += "?" + parsed.query
     return dest
 
 
@@ -2968,11 +3363,18 @@ def is_preview_crawler(user_agent):
 def shop_products_from_state(state):
     state = state or {}
     products = state.get("products")
+    times = state.get("stock_changed_at") or {}
+    if not isinstance(times, dict):
+        times = {}
     if products:
         out = []
         for item in products:
             row = dict(item)
             row.update(product_line_fields(row))
+            if not row.get("stock_changed_at"):
+                changed = times.get(row.get("sku")) or times.get(str(row.get("sku") or ""))
+                if changed:
+                    row["stock_changed_at"] = _stamp_text(changed)
             out.append(row)
         return out
     stock = state.get("stock") or {}
@@ -3006,7 +3408,27 @@ def site_group_key(source):
     origin = str((source or {}).get("origin") or "").strip().rstrip("/").lower()
     if origin:
         return origin
-    return str((source or {}).get("id") or "")
+    return sid
+
+
+def source_is_hidden(source):
+    return bool((source or {}).get("hidden"))
+
+
+def source_is_test(source):
+    """Kept off the public /shops list. Still listed on /product and /shopslist."""
+    return bool((source or {}).get("test"))
+
+
+def source_is_listed(source):
+    """Shown on /product, including test shops that stay off /shops."""
+    source = source or {}
+    return bool(source.get("enabled", True) and not source_is_hidden(source))
+
+
+def source_is_public(source):
+    """Shown on the public /shops status page. Test shops stay on /shopslist."""
+    return source_is_listed(source) and not source_is_test(source)
 
 
 def sources_for_shop_page(shop_id, cfg=None):
@@ -3156,6 +3578,7 @@ def load_shop_products_for_shop_id(shop_id, cfg=None):
         label = site_display_label(source, cfg)
         for item in load_shop_products_for_source(source):
             row = dict(item)
+            row["shop_id"] = sid
             if show_shop:
                 row["shop_label"] = label
             sku = str(row.get("sku") or "")
@@ -3170,17 +3593,46 @@ def load_shop_products_for_shop_id(shop_id, cfg=None):
 
 
 def shop_products_href(shop_id, stock=None, tag=None):
-    path = "/shop/%s" % urllib.parse.quote(str(shop_id or ""), safe="-")
+    """Product gallery with the shop, stock, and line filters already set."""
     query = []
     if stock == "in_stock":
         query.append(("stock", "in"))
     elif stock == "out_of_stock":
         query.append(("stock", "out"))
-    if tag in ("CX", "BX", "UX", "kuji", "other"):
+    if tag in ("CX", "BX", "UX", "BXG", "kuji", "other"):
         query.append(("tag", tag))
+    shop_id = str(shop_id or "")
+    if shop_id and shop_id != "all":
+        query.append(("shop", shop_id))
     if query:
-        return path + "?" + urllib.parse.urlencode(query)
-    return path
+        return "/product?" + urllib.parse.urlencode(query)
+    return "/product"
+
+
+def shop_list_redirect(path):
+    """Send old per-shop list URLs to /product with the same filters preset.
+
+    /shop/all?stock=in stays put: that path is the in-stock row list.
+    """
+    parsed = urllib.parse.urlparse(path or "")
+    raw = (parsed.path or "").rstrip("/") or "/"
+    if not raw.startswith("/shop/"):
+        return None
+    shop_id = urllib.parse.unquote(raw[len("/shop/") :].strip("/"))
+    if not shop_id or "/" in shop_id:
+        return None
+    stock = stock_filter_from_query(parsed.query)
+    if shop_id == "all" and stock == "in_stock":
+        return None
+    meta = shop_page_meta(shop_id)
+    if not meta:
+        return None
+    target = str(meta.get("id") or shop_id)
+    return shop_products_href(
+        "" if target == "all" else target,
+        stock or None,
+        tag_filter_from_query(parsed.query) or None,
+    )
 
 
 def stock_filter_from_query(query):
@@ -3196,6 +3648,30 @@ def stock_filter_from_query(query):
     return ""
 
 
+def sort_filter_from_query(query):
+    raw = ""
+    for key, val in urllib.parse.parse_qsl(query or "", keep_blank_values=True):
+        if key == "sort":
+            raw = (val or "").strip().lower()
+            break
+    if raw in ("new", "publish", "release"):
+        return "new"
+    return ""
+
+
+def shop_filter_from_query(query):
+    raw = ""
+    for key, val in urllib.parse.parse_qsl(query or "", keep_blank_values=True):
+        if key == "shop":
+            raw = (val or "").strip()
+            break
+    if not raw or raw == "all":
+        return ""
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,64}$", raw):
+        return ""
+    return raw
+
+
 def tag_filter_from_query(query):
     raw = ""
     for key, val in urllib.parse.parse_qsl(query or "", keep_blank_values=True):
@@ -3209,6 +3685,8 @@ def tag_filter_from_query(query):
     upper = raw.upper()
     if upper in ("CX", "BX", "UX"):
         return upper
+    if upper in ("BXG", "BXA", "BXC", "BXH", "BX+"):
+        return "BXG"
     return ""
 
 
@@ -3225,8 +3703,17 @@ def product_stock_key(item):
     return key
 
 
+def skips_line_model(item):
+    """Amazon.com retail listings are Hasbro products, not BX/CX/UX codes."""
+    return str((item or {}).get("shop_id") or "") in USD_SHOP_IDS
+
+
 def product_tag_key(item):
+    if skips_line_model(item):
+        return ""
     model = listing_model_code(item)
+    if "+" in model:
+        return "other"
     if model.startswith("KUJI"):
         return "kuji"
     tag = str((item or {}).get("tag") or "").strip()
@@ -3239,6 +3726,12 @@ def product_tag_key(item):
 
 def listing_model_code(item):
     item = item or {}
+    if skips_line_model(item):
+        return ""
+    title = " ".join(str(item.get(key) or "") for key in ("title", "name"))
+    combined = combined_model_code(specific_model_codes(title))
+    if combined:
+        return combined
     stored = str(item.get("model") or "").strip().upper()
     parsed = str(product_line_fields(item).get("model") or "").strip().upper()
     text = " ".join(str(item.get(key) or "") for key in ("title", "sku", "name"))
@@ -3259,6 +3752,18 @@ def listing_price_value(item):
         return float(match.group(0))
     except ValueError:
         return None
+
+
+def listing_hkd_value(item, shop_id=""):
+    value = listing_price_value(item)
+    if value is None:
+        return None
+    code = item_currency_code(item, shop_id)
+    if code == "JPY":
+        return jpy_to_hkd(value)
+    if code == "USD":
+        return usd_to_hkd(value)
+    return value
 
 
 def listing_rank(item):
@@ -3300,14 +3805,16 @@ def group_listings_by_model(items):
 
 
 def group_tag_key(group):
+    items = list((group or {}).get("items") or [])
+    if items and all(skips_line_model(item) for item in items):
+        return ""
     model = str((group or {}).get("model") or "")
+    if "+" in model:
+        return "other"
     if model.startswith("KUJI"):
         return "kuji"
-    if re.match(r"^(CX|BX|UX)G", model):
-        for item in (group or {}).get("items") or []:
-            tag = product_line_fields(item).get("tag")
-            if tag in ("CX", "BX", "UX"):
-                return tag
+    if re.match(r"^BX[A-Z]", model):
+        return "BXG"
     if model.startswith("CX"):
         return "CX"
     if model.startswith("BX"):

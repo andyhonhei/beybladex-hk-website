@@ -28,6 +28,8 @@ from site_data import (
     display_status_shops,
     filter_index_notifies,
     filter_notify_history,
+    explore_href,
+    explore_http_result,
     go_href,
     go_http_result,
     go_page_target,
@@ -42,6 +44,8 @@ from site_data import (
     load_shop_products_for_shop_id,
     mysql_ok_cached,
     parse_go_path,
+    product_path_redirect,
+    shop_list_redirect,
     prune_edge_purge_log,
     purge_edge_cache,
     request_edge_purge,
@@ -159,9 +163,9 @@ class StatusPageTests(unittest.TestCase):
         markup = subscribe_widget_html("訂閱")
         names = re.findall(r'class="subscribe-name">([^<]+)', markup)
         self.assertEqual(names, ["Telegram", "Discord", "Threads"])
-        self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", markup)
-        self.assertIn("https://discord.gg/C8Q5gZf3y5", markup)
-        self.assertIn("https://discord.gg/C8Q5gZf3y5", markup)
+        self.assertIn(explore_href("https://t.me/+mbTPVeGFBalhMjQ9"), markup)
+        self.assertIn(explore_href("https://discord.gg/C8Q5gZf3y5"), markup)
+        self.assertIn(explore_href("https://www.threads.com/@hkbeybladex_com"), markup)
         self.assertIn("香港爆旋陀螺到貨通知", markup)
         self.assertIn('<a href="/shops">Online舖頭</a>', markup)
         self.assertNotIn("本地舖頭", markup)
@@ -199,8 +203,14 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn('<a href="/shops">店舖現況</a>', page)
         self.assertNotIn("<th>網站</th>", page)
         self.assertNotIn("https://eshop.cuapp.com", page)
-        self.assertIn("/shop/cuapp", page)
+        self.assertIn("href='/product?shop=cuapp'", page)
+        self.assertNotIn("/shop/cuapp", page)
         self.assertIn("index, follow", page)
+        self.assertIn(
+            'name="keywords" content="店舖現況, HobbyDigi, BuyMarketToy, MoonroadHK, Takara Tomy Mall, 爆旋陀螺現貨, 爆旋陀螺開訂, beyblade x, 陀螺, 戰鬥陀螺, hkbeybladex"',
+            page,
+        )
+        self.assertNotIn("Beyblade X restock HK", page)
         self.assertIn("<th>商店</th>", page)
         self.assertIn("<th>狀態</th>", page)
         self.assertIn("<th>SKU</th>", page)
@@ -351,12 +361,32 @@ class StatusPageTests(unittest.TestCase):
         admin = render_shops_html(cfg, payload, show_updated=True)
         self.assertIn("CU APP", public)
         self.assertNotIn("1999.jp", public)
-        self.assertNotIn("/shop/1999jp", public)
+        self.assertIn("/shops", public)
         self.assertIn("1999.jp", admin)
         self.assertIn("/shopslist", admin)
-        self.assertIn("/shop/1999jp", admin)
+        self.assertIn("/product?shop=1999jp", admin)
         self.assertEqual(shop_page_meta("1999jp", cfg)["label"], "1999.jp")
-        self.assertIn("1999jp", [row["id"] for row in shop_chip_shops(cfg)])
+        chips = shop_chip_shops(cfg)
+        self.assertIn("1999jp", [row["id"] for row in chips])
+        product = render_models_html(
+            [
+                {
+                    "sku": "11335022",
+                    "shop_id": "1999jp",
+                    "shop_label": "1999.jp",
+                    "title": "BX-01 Dran Sword",
+                    "model": "BX-01",
+                    "tag": "BX",
+                    "price": "1980",
+                    "status": "in_stock",
+                    "url": "https://www.1999.co.jp/11335022",
+                }
+            ],
+            shops=chips,
+        )
+        self.assertIn("1999.jp", product)
+        self.assertIn('href="/product?shop=1999jp"', product)
+        self.assertIn("BX-01 Dran Sword", product)
 
     def test_nav_includes_history_button(self):
         nav = site_nav_html()
@@ -387,7 +417,7 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn("心機", page)
         self.assertIn("<details", page)
         self.assertIn("PayMe", page)
-        self.assertIn("https://payme.hsbc/andyhuihh", page)
+        self.assertIn(explore_href("https://payme.hsbc/andyhuihh"), page)
         self.assertIn("AlipayHK", page)
         self.assertIn("/alipayhk.jpg", page)
         self.assertNotIn("buymeacoffee", page)
@@ -397,9 +427,9 @@ class StatusPageTests(unittest.TestCase):
     def test_subscribe_page_lists_channels_and_is_hidden_from_nav(self):
         page = render_subscribe_html()
         self.assertIn("訂閱通知", page)
-        self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", page)
-        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
-        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
+        self.assertIn(explore_href("https://t.me/+mbTPVeGFBalhMjQ9"), page)
+        self.assertIn(explore_href("https://discord.gg/C8Q5gZf3y5"), page)
+        self.assertIn(explore_href("https://www.threads.com/@hkbeybladex_com"), page)
         self.assertIn("加入群組", page)
         self.assertIn("加入頻道", page)
         self.assertIn("鐘仔", page)
@@ -493,7 +523,8 @@ class StatusPageTests(unittest.TestCase):
         self.assertNotIn("MySQL", page)
         self.assertNotIn("EC2", page)
         self.assertNotIn("#128a3e", page)
-        self.assertIn("/shop/animepro", page)
+        self.assertIn("href='/product?shop=animepro'", page)
+        self.assertNotIn("/shop/animepro", page)
         self.assertIn('id="site-nav-menu-btn"', page)
         self.assertIn('href="/shop/all?stock=in"', page)
         self.assertIn("全部現貨", page)
@@ -503,9 +534,9 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn('id="subscribe-hero-btn"', page)
         self.assertNotIn(">/\\\\-_ =+|  beybladex  |+= _-/\\\\</button>", page)
         self.assertIn('class="ascii"', page)
-        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
-        self.assertIn("https://discord.gg/C8Q5gZf3y5", page)
-        self.assertIn("https://t.me/+mbTPVeGFBalhMjQ9", page)
+        self.assertIn(explore_href("https://discord.gg/C8Q5gZf3y5"), page)
+        self.assertIn(explore_href("https://www.threads.com/@hkbeybladex_com"), page)
+        self.assertIn(explore_href("https://t.me/+mbTPVeGFBalhMjQ9"), page)
         self.assertIn("subscribe-method", page)
         self.assertIn("Threads", page)
         self.assertIn("Discord", page)
@@ -628,15 +659,17 @@ class StatusPageTests(unittest.TestCase):
                 ],
             }
         )
-        self.assertIn("href='/shop/all'", page)
-        self.assertIn("href='/shop/all?stock=in'", page)
-        self.assertIn("href='/shop/all?stock=out'", page)
-        self.assertIn("href='/shop/lastchance'", page)
-        self.assertIn("href='/shop/lastchance?stock=in'", page)
-        self.assertIn("href='/shop/lastchance?stock=out'", page)
-        self.assertIn("href='/shop/animepro'", page)
-        self.assertIn("href='/shop/animepro?stock=out'", page)
-        self.assertNotIn("href='/shop/animepro?stock=in'", page)
+        self.assertIn("href='/product'", page)
+        self.assertIn("href='/product?stock=in'", page)
+        self.assertIn("href='/product?stock=out'", page)
+        self.assertIn("href='/product?shop=lastchance'", page)
+        self.assertIn("href='/product?stock=in&amp;shop=lastchance'", page)
+        self.assertIn("href='/product?stock=out&amp;shop=lastchance'", page)
+        self.assertIn("href='/product?shop=animepro'", page)
+        self.assertIn("href='/product?stock=out&amp;shop=animepro'", page)
+        self.assertNotIn("href='/product?stock=in&amp;shop=animepro'", page)
+        self.assertNotIn("/shop/lastchance", page)
+        self.assertNotIn("/shop/animepro", page)
 
     def test_hobbyland_sources_share_one_website_and_all_row(self):
         cfg = {
@@ -761,8 +794,8 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn("Hobbyland", page)
         self.assertNotIn(">HobbylandBeyblade<", page)
         self.assertIn("/shop/all", page)
-        self.assertIn("/shop/hobbyland", page)
-        self.assertNotIn("/shop/hobbyland-beyblade", page)
+        self.assertIn("href='/product?shop=hobbyland'", page)
+        self.assertNotIn("/shop/hobbyland", page)
 
     def test_hobbyland_products_use_website_name(self):
         cfg = {
@@ -892,7 +925,7 @@ class StatusPageTests(unittest.TestCase):
         login = render_admin_login_html()
         notify = render_notify_test_html()
         self.assertIn("noindex, nofollow", login)
-        self.assertNotIn("noindex, nofollow", notify)
+        self.assertIn("noindex, nofollow", notify)
         for page in (login, notify):
             self.assertNotIn("Demo1234!", page)
             self.assertNotIn("88888888", page)
@@ -1001,7 +1034,7 @@ class StatusPageTests(unittest.TestCase):
             key_query="?key=abc",
         )
         self.assertIn("Beyblade X BXG-47", page)
-        self.assertIn("https://fooklemodel.com/product/bxg-47/", page)
+        self.assertIn(explore_href("https://fooklemodel.com/product/bxg-47/"), page)
         self.assertIn("HK$150", page)
         self.assertIn("/images/fooklemodel/115537.jpg", page)
         self.assertIn("product-card", page)
@@ -1047,9 +1080,10 @@ class StatusPageTests(unittest.TestCase):
             ],
         )
         self.assertLess(page.find("In stock later"), page.find("Out of stock top"))
-        self.assertIn('href="/shop/fooklemodel"', page)
-        self.assertIn('href="/shop/fooklemodel?stock=in"', page)
-        self.assertIn('href="/shop/fooklemodel?stock=out"', page)
+        self.assertIn('href="/product?shop=fooklemodel"', page)
+        self.assertIn('href="/product?stock=in&amp;shop=fooklemodel"', page)
+        self.assertIn('href="/product?stock=out&amp;shop=fooklemodel"', page)
+        self.assertNotIn("/shop/fooklemodel", page)
         self.assertIn("全部 2", page)
         self.assertIn("有貨 1", page)
         self.assertIn("缺貨 1", page)
@@ -1091,9 +1125,10 @@ class StatusPageTests(unittest.TestCase):
             ],
             shops=shop_chip_shops(cfg),
         )
-        self.assertIn('href="/shop/all">All</a>', page)
-        self.assertIn('href="/shop/hobbyland"', page)
-        self.assertIn('href="/shop/animepro"', page)
+        self.assertIn('href="/product">All</a>', page)
+        self.assertIn('href="/product?shop=hobbyland"', page)
+        self.assertIn('href="/product?shop=animepro"', page)
+        self.assertNotIn("/shop/hobbyland", page)
         self.assertIn("AnimesPro", page)
         self.assertIn("Hobbyland", page)
         self.assertNotIn(">HobbylandBeyblade<", page)
@@ -1115,7 +1150,7 @@ class StatusPageTests(unittest.TestCase):
             current_id="all",
         )
         self.assertNotIn("filter-combo", chips)
-        self.assertIn('href="/shop/all">All</a>', chips)
+        self.assertIn('href="/product">All</a>', chips)
         page = render_products_html(
             {"id": "all", "label": "全部"},
             [],
@@ -1207,10 +1242,10 @@ class StatusPageTests(unittest.TestCase):
             },
         ]
         page = render_products_html({"id": "fooklemodel", "label": "FookLeModel"}, items)
-        self.assertIn('href="/shop/fooklemodel?tag=CX"', page)
-        self.assertIn('href="/shop/fooklemodel?tag=BX"', page)
-        self.assertIn('href="/shop/fooklemodel?tag=UX"', page)
-        self.assertIn('href="/shop/fooklemodel?tag=other"', page)
+        self.assertIn('href="/product?tag=CX&amp;shop=fooklemodel"', page)
+        self.assertIn('href="/product?tag=BX&amp;shop=fooklemodel"', page)
+        self.assertIn('href="/product?tag=UX&amp;shop=fooklemodel"', page)
+        self.assertIn('href="/product?tag=other&amp;shop=fooklemodel"', page)
         self.assertIn("CX [1]", page)
         self.assertIn("BX [1]", page)
         self.assertIn("UX [0]", page)
@@ -1223,7 +1258,7 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn("Beyblade X CX-19", cx_page)
         self.assertNotIn("Beyblade X BX-50", cx_page)
         self.assertNotIn("Beyblade stadium", cx_page)
-        self.assertIn('href="/shop/fooklemodel?stock=in&amp;tag=CX"', cx_page)
+        self.assertIn('href="/product?stock=in&amp;tag=CX&amp;shop=fooklemodel"', cx_page)
 
     def test_shop_products_fall_back_to_skus(self):
         items = shop_products_from_state(
@@ -1288,7 +1323,57 @@ class StatusPageTests(unittest.TestCase):
         self.assertIn("status-pop[open] .status-tip", hidden)
         self.assertNotIn("<th>錯誤</th>", hidden)
 
-
+    def test_shopslist_keeps_amazon_jp_retail_separate(self):
+        cfg = {
+            "sources": [
+                {
+                    "id": "amazon-jp",
+                    "label": "Amazon (JP)",
+                    "origin": "https://www.amazon.co.jp",
+                    "enabled": True,
+                },
+                {
+                    "id": "amazon-jp-retail",
+                    "label": "Amazon.co.jp 直販",
+                    "origin": "https://www.amazon.co.jp",
+                    "enabled": True,
+                },
+            ]
+        }
+        page = render_shops_html(
+            cfg,
+            payload={
+                "checked_at": "2026-11-13 16:00:00",
+                "ok": True,
+                "shops": [
+                    {
+                        "id": "amazon-jp",
+                        "label": "Amazon (JP)",
+                        "enabled": True,
+                        "sku_count": 77,
+                        "in_stock": 14,
+                        "out_of_stock": 63,
+                    },
+                    {
+                        "id": "amazon-jp-retail",
+                        "label": "Amazon.co.jp 直販",
+                        "enabled": True,
+                        "sku_count": 6,
+                        "in_stock": 0,
+                        "out_of_stock": 6,
+                    },
+                ],
+            },
+            show_updated=True,
+        )
+        self.assertIn("Amazon.co.jp 直販", page)
+        self.assertIn("href='/product?shop=amazon-jp-retail'", page)
+        self.assertNotIn("/shop/amazon-jp-retail", page)
+        self.assertIn("/shopslist", page)
+        self.assertEqual(
+            [row["id"] for row in display_status_shops(cfg["sources"], cfg)],
+            ["all", "amazon-jp", "amazon-jp-retail"],
+        )
 
 
 class StatusAuthTests(unittest.TestCase):
@@ -1308,6 +1393,71 @@ class StatusAuthTests(unittest.TestCase):
             "/shop/cuapp?stock=in",
         )
 
+    def test_old_model_paths_redirect_to_product(self):
+        self.assertEqual(product_path_redirect("/models"), "/product")
+        self.assertEqual(product_path_redirect("/models/"), "/product")
+        self.assertEqual(product_path_redirect("/model"), "/product")
+        self.assertEqual(
+            product_path_redirect("/models/BX-01?stock=in"),
+            "/product/BX-01?stock=in",
+        )
+        self.assertEqual(product_path_redirect("/model/CX-18"), "/product/CX-18")
+        self.assertIsNone(product_path_redirect("/product"))
+        self.assertIsNone(product_path_redirect("/product/BX-01"))
+        self.assertIsNone(product_path_redirect("/shops"))
+
+    def test_shop_list_pages_redirect_to_product_filter(self):
+        apply_config(
+            {
+                "sources": [
+                    {
+                        "id": "hobbyland",
+                        "label": "Hobbyland",
+                        "origin": "https://www.hobbylandeshop.com",
+                        "enabled": True,
+                    },
+                    {
+                        "id": "hobbyland-beyblade",
+                        "label": "HobbylandBeyblade",
+                        "origin": "https://www.hobbylandeshop.com",
+                        "enabled": True,
+                    },
+                    {
+                        "id": "animepro",
+                        "label": "AnimesPro",
+                        "origin": "https://animes-pro.com",
+                        "enabled": True,
+                    },
+                ]
+            }
+        )
+        try:
+            self.assertEqual(
+                shop_list_redirect("/shop/hobbyland"),
+                "/product?shop=hobbyland",
+            )
+            self.assertEqual(
+                shop_list_redirect("/shop/hobbyland-beyblade"),
+                "/product?shop=hobbyland",
+            )
+            self.assertEqual(
+                shop_list_redirect("/shop/hobbyland?stock=in&tag=CX"),
+                "/product?stock=in&tag=CX&shop=hobbyland",
+            )
+            self.assertEqual(
+                shop_list_redirect("/shop/animepro?stock=out"),
+                "/product?stock=out&shop=animepro",
+            )
+            self.assertEqual(shop_list_redirect("/shop/all"), "/product")
+            self.assertEqual(shop_list_redirect("/shop/all?tag=BX"), "/product?tag=BX")
+            self.assertIsNone(shop_list_redirect("/shop/all?stock=in"))
+            self.assertIsNone(shop_list_redirect("/shop/all?stock=in&shop=amazon"))
+            self.assertIsNone(shop_list_redirect("/shop/missing"))
+            self.assertIsNone(shop_list_redirect("/shops"))
+            self.assertIsNone(shop_list_redirect("/product?shop=hobbyland"))
+        finally:
+            apply_config(load_config())
+
     def test_robots_txt_allows_catalog_and_blocks_home(self):
         apply_config({})
         body = robots_txt()
@@ -1316,7 +1466,15 @@ class StatusAuthTests(unittest.TestCase):
         self.assertNotIn("\nDisallow: /\n", body)
         self.assertNotIn("Allow: /in-stock", body)
         self.assertIn("Sitemap: https://hkbeybladex.com/sitemap.xml", body)
-        self.assertNotIn("Disallow:", body)
+        self.assertIn("Disallow: /shopslist", body)
+        self.assertIn("Disallow: /login", body)
+        self.assertIn("Disallow: /notify-test", body)
+        self.assertNotIn("Disallow: /product", body)
+        self.assertNotIn("\nDisallow: /\n", body)
+        admin_robots = robots_txt("beybladex-admin.andyhhh.com")
+        self.assertIn("Disallow: /", admin_robots)
+        self.assertNotIn("Sitemap:", admin_robots)
+        self.assertNotIn("Allow: /", admin_robots)
 
     def test_sitemap_lists_in_stock_and_shops(self):
         apply_config({})
@@ -1338,7 +1496,7 @@ class StatusAuthTests(unittest.TestCase):
         self.assertIn("https://hkbeybladex.com/", xml)
         self.assertIn("https://hkbeybladex.com/watch", xml)
         self.assertIn("https://hkbeybladex.com/share", xml)
-        self.assertIn("https://hkbeybladex.com/shop/all", xml)
+        self.assertNotIn("https://hkbeybladex.com/shop/all", xml)
         self.assertIn("https://hkbeybladex.com/shops", xml)
         self.assertIn("https://hkbeybladex.com/catalog", xml)
         self.assertIn("https://hkbeybladex.com/parts", xml)
@@ -1347,10 +1505,16 @@ class StatusAuthTests(unittest.TestCase):
         self.assertIn("https://hkbeybladex.com/privacy", xml)
         self.assertIn("https://hkbeybladex.com/terms", xml)
         self.assertNotIn("/coffee", xml)
-        self.assertIn("https://hkbeybladex.com/shop/cuapp", xml)
+        self.assertNotIn("https://hkbeybladex.com/shop/cuapp", xml)
+        self.assertNotIn("/product?shop=", xml)
         self.assertNotIn("/in-stock", xml)
         self.assertNotIn("/notify-test", xml)
+        self.assertNotIn("/shopslist", xml)
+        self.assertNotIn("/login", xml)
+        self.assertNotIn("/models", xml)
+        self.assertIn("https://hkbeybladex.com/product", xml)
         self.assertNotIn("/go/", xml)
+        self.assertNotIn("/explore", xml)
         import xml.etree.ElementTree as ET
 
         root = ET.fromstring(xml)
@@ -1411,7 +1575,11 @@ class GoTrackTests(unittest.TestCase):
             page,
         )
         self.assertIn(
-            'property="og:description" content="香港爆旋陀螺到貨通知。Online舖頭 有新品、補貨、缺貨就出帖。非官方。 可經 Threads、Discord、Telegram 收通知。"',
+            'property="og:description" content="24小時自動監控香港各大網店及官方渠道（HobbyDigi、BuyMarketToy、MoonroadHK、Takara Tomy Mall等）爆旋陀螺 X 現貨與開訂狀態。即時接收 Telegram、Discord 及 Threads 補貨通知，與香港陀螺手交流情報！"',
+            page,
+        )
+        self.assertIn(
+            'name="keywords" content="beybladex, 爆旋陀螺, 爆旋陀螺 X, Beyblade X 香港, 爆旋陀螺補貨, 爆旋陀螺現貨, 爆旋陀螺開訂, HK BeybladeX Watch, Takara Tomy 香港, 陀螺社群, Beyblade X restock HK, beyblade x, 陀螺, 戰鬥陀螺, hkbeybladex"',
             page,
         )
         self.assertIn("/og-card.jpg", page)
@@ -1547,6 +1715,7 @@ class GoTrackTests(unittest.TestCase):
         self.assertIn("location.replace(dest)", result["html"])
         self.assertIn("setTimeout(go, 500)", result["html"])
         self.assertIn("go-loading", result["html"])
+        self.assertNotIn("go-card", result["html"])
         self.assertNotIn('http-equiv="refresh"', result["html"])
         self.assertIn("gtag('config', 'G-19VVZP9R25')", result["html"])
         self.assertIn("transport_type:'beacon'", result["html"])
@@ -1559,11 +1728,8 @@ class GoTrackTests(unittest.TestCase):
         self.assertEqual(result["status"], 200)
         self.assertEqual(result.get("cache"), "private, no-store")
         self.assertIn("go-loading", result["html"])
+        self.assertNotIn("go-card", result["html"])
         self.assertIn("setTimeout(go, 500)", result["html"])
-        self.assertNotIn(
-            "Follow 我哋 Threads 之後記得撳右上角訂閱／鐘仔掣，訂閱帖文通知",
-            result["html"],
-        )
 
     def test_go_http_preview_crawler_keeps_go_og_tags(self):
         result = go_http_result(
@@ -1597,6 +1763,7 @@ class GoTrackTests(unittest.TestCase):
         self.assertIn('property="og:title"', telegram["html"])
         human = go_http_result("/go/uat/test", query="from=telegram")
         self.assertIn("go-loading", human["html"])
+        self.assertNotIn("go-card", human["html"])
         self.assertIn("setTimeout(go, 500)", human["html"])
         preview = go_http_result("/go/uat/preview", query="from=threads")
         self.assertEqual(preview["status"], 200)
@@ -1668,11 +1835,13 @@ class GoTrackTests(unittest.TestCase):
         )
         self.assertIn("location.replace(dest)", bounce)
         self.assertIn("setTimeout(go, 500)", bounce)
+        self.assertIn("x-safari-", bounce)
+        self.assertIn("intent://", bounce)
         self.assertIn("go-loading", bounce)
         self.assertNotIn('http-equiv="refresh"', bounce)
-        self.assertIn("discord.gg/C8Q5gZf3y5", page)
-        self.assertIn("t.me/+mbTPVeGFBalhMjQ9", page)
-        self.assertIn("discord.gg/C8Q5gZf3y5", page)
+        self.assertIn(explore_href("https://discord.gg/C8Q5gZf3y5"), page)
+        self.assertIn(explore_href("https://t.me/+mbTPVeGFBalhMjQ9"), page)
+        self.assertIn(explore_href("https://www.threads.com/@hkbeybladex_com"), page)
         self.assertIn(
             "Follow 我哋 Threads 之後記得撳右上角訂閱／鐘仔掣，訂閱帖文通知",
             page,
@@ -2227,6 +2396,126 @@ class ProductLineHtmlTests(unittest.TestCase):
         self.assertIn("缺貨", card)
         self.assertNotIn("class='stock-in'", card)
 
+    def test_mall_sale_notes_render_as_tags(self):
+        card = product_card_html(
+            {
+                "sku": "4904810077398",
+                "title": "【現貨】【アプリ・イベント限定】BEYBLADE X【レアベイ購入チケット対象】",
+                "status": "in_stock",
+                "status_label": "有貨（現貨・稀有陀螺購買券・應用活動限定）",
+            },
+            "takaratomymall",
+        )
+        self.assertIn("sale-tag--event", card)
+        self.assertIn("App/活動限定", card)
+        self.assertIn("sale-tag--ticket", card)
+        self.assertIn("稀有陀螺購買券", card)
+        self.assertIn("sale-tag--spot", card)
+        self.assertIn(">現貨<", card)
+        self.assertIn("有貨", card)
+        self.assertNotIn("有貨（現貨）", card)
+        self.assertNotIn("有貨（現貨・稀有陀螺購買券・應用活動限定）", card)
+
+    def test_stock_kinds_render_as_tags(self):
+        card = product_card_html(
+            {
+                "sku": "2",
+                "title": "【抽選已完】BEYBLADE X",
+                "status": "out_of_stock",
+                "status_label": "缺貨（抽選已完）",
+            },
+            "takaratomymall",
+        )
+        self.assertIn("sale-tag--ended", card)
+        self.assertIn(">抽選已完<", card)
+        self.assertNotIn("sale-tag--raffle", card)
+        self.assertIn("缺貨", card)
+        self.assertNotIn("缺貨（抽選已完）", card)
+
+    def test_yen_shop_price_converts_to_hkd(self):
+        from site_data import _FX_HKD_CACHE
+
+        _FX_HKD_CACHE["JPY"] = {"rate": 0.05, "at": time.time()}
+        card = product_card_html(
+            {
+                "sku": "3",
+                "title": "【預約】BX-55",
+                "price": "1600",
+                "status": "in_stock",
+                "status_label": "有貨（預約）",
+            },
+            "yodobashi",
+        )
+        self.assertIn("¥1,600", card)
+        self.assertIn("約 HK$80", card)
+        self.assertNotIn("HK$1600", card)
+        self.assertIn("sale-tag--preorder", card)
+        self.assertIn(">預約<", card)
+        self.assertIn("data-price='80'", card)
+
+    def test_usd_grid_price_keeps_dollars_and_hkd_estimate(self):
+        from site_data import _FX_HKD_CACHE
+        from site_pages import model_grid_card_html
+
+        _FX_HKD_CACHE["USD"] = {"rate": 7.8, "at": time.time()}
+        card = model_grid_card_html(
+            {
+                "model": "",
+                "items": [
+                    {
+                        "sku": "B0TEST",
+                        "shop_id": "amazon-us-retail",
+                        "title": "Cobalt Drake",
+                        "price": "22.67",
+                        "currency": "USD",
+                        "status": "in_stock",
+                        "status_label": "有貨",
+                    }
+                ],
+            }
+        )
+        self.assertIn("US$22.67（約 HK$177）", card)
+        self.assertNotIn("USD・美元", card)
+        self.assertNotIn("HK$22.67", card)
+
+    def test_amazon_jp_retail_price_uses_jpy_prefix(self):
+        from site_data import _FX_HKD_CACHE
+        from site_pages import model_grid_card_html, notify_rows_html
+
+        _FX_HKD_CACHE["JPY"] = {"rate": 0.05, "at": time.time()}
+        card = model_grid_card_html(
+            {
+                "model": "BX-01",
+                "items": [
+                    {
+                        "sku": "B0JP",
+                        "shop_id": "amazon-jp-retail",
+                        "title": "BX-01",
+                        "price": "1580",
+                        "currency": "JPY",
+                        "status": "in_stock",
+                        "status_label": "有貨",
+                    }
+                ],
+            }
+        )
+        self.assertIn("JPY¥1580（約 HK$79）", card)
+        self.assertNotIn("¥1,580", card)
+        row = notify_rows_html(
+            [
+                {
+                    "at": "2026-08-30 09:00:00",
+                    "shop": "Amazon.co.jp 直販",
+                    "shop_id": "amazon-jp-retail",
+                    "event": "restock",
+                    "title": "BX-01",
+                    "price": "1580",
+                    "currency": "JPY",
+                }
+            ]
+        )
+        self.assertIn("JPY¥1580（約 HK$79）", row)
+
     def test_in_stock_card_includes_tag_and_model(self):
         card = product_card_html(
             {
@@ -2703,6 +2992,80 @@ class ModelGridTests(unittest.TestCase):
             listing_model_code({"model": "BX-00", "title": "BX-00 Marvel"}),
             "BXA-04",
         )
+        self.assertEqual(
+            listing_model_code({"title": "UX-00 翔空天馬 3-70A"}),
+            "BXH-10",
+        )
+        self.assertEqual(
+            listing_model_code({"model": "UX-00:AERO:3-70A", "title": "UX-00:AERO:3-70A"}),
+            "BXH-10",
+        )
+        self.assertEqual(
+            listing_model_code({"title": "UX-00 翔空天馬 3-70A 紅色"}),
+            "BXG-24",
+        )
+
+    def test_multi_model_name_is_other_and_marks_every_model(self):
+        from site_data import group_tag_key, product_tag_key
+
+        bundle = {
+            "sku": "set",
+            "shop_id": "h1",
+            "title": "CX-16 啟動衝刺套裝 + CX-20 自訂改裝套組",
+            "model": "CX-16",
+            "tag": "CX",
+            "price": "500",
+            "status": "in_stock",
+        }
+        same_set = {
+            "sku": "set-b",
+            "shop_id": "h2",
+            "title": "CX20 自訂改裝套組C + CX16 啟動套裝",
+            "model": "CX-20",
+            "tag": "CX",
+            "price": "480",
+            "status": "in_stock",
+        }
+        single = {
+            "sku": "cx16",
+            "shop_id": "h1",
+            "title": "CX-16 龍王閃擊",
+            "model": "CX-16",
+            "tag": "CX",
+            "price": "100",
+            "status": "in_stock",
+        }
+        packed = {
+            "sku": "pack",
+            "shop_id": "h3",
+            "title": "優惠 Bundle（CX16 + UX03 + 自選 BX25 / BX43）",
+            "model": "CX-16",
+            "tag": "CX",
+            "price": "900",
+            "status": "in_stock",
+        }
+        self.assertEqual(listing_model_code(bundle), "CX-16+CX-20")
+        self.assertEqual(listing_model_code(same_set), "CX-16+CX-20")
+        self.assertEqual(listing_model_code(single), "CX-16")
+        self.assertEqual(listing_model_code(packed), "BX-25+BX-43+CX-16+UX-03")
+        self.assertEqual(product_tag_key(bundle), "other")
+        groups = group_listings_by_model([single, bundle, same_set, packed])
+        by_model = {group["model"]: group for group in groups}
+        self.assertEqual(len(by_model["CX-16"]["items"]), 1)
+        self.assertEqual(len(by_model["CX-16+CX-20"]["items"]), 2)
+        self.assertEqual(group_tag_key(by_model["CX-16+CX-20"]), "other")
+        page = render_models_html([single, bundle, same_set, packed])
+        other_at = page.index("id='models-other'")
+        self.assertLess(page.index("data-model='CX-16'"), other_at)
+        self.assertLess(other_at, page.index("catalog-card__id'>CX-16 · CX-20"))
+        self.assertLess(other_at, page.index("catalog-card__id'>BX-25 · BX-43 · CX-16 · UX-03"))
+        cx = render_models_html([single, bundle], tag_filter="CX")
+        self.assertIn("data-model='CX-16'", cx)
+        self.assertNotIn("CX-16 · CX-20", cx)
+        other = render_models_html([single, bundle, packed], tag_filter="other")
+        self.assertIn("CX-16 · CX-20", other)
+        self.assertIn("BX-25 · BX-43 · CX-16 · UX-03", other)
+        self.assertNotIn("龍王閃擊", other)
 
     def test_group_merges_same_model_in_alpha_order(self):
         groups = group_listings_by_model(
@@ -2737,14 +3100,14 @@ class ModelGridTests(unittest.TestCase):
             site_pages._CATALOG_PRODUCT_CACHE["stamp"] = None
             with mock.patch.object(parts_catalog, "PARTS_DIR", dest):
                 page = self._render_merged_models_page()
-        button = page.split("<button type='button' class='catalog-card__hit'", 1)[1].split("</button>", 1)[0]
+        button = page.split("class='catalog-card__hit'", 1)[1].split("</a>", 1)[0]
         self.assertIn("src='https://cdn.example/cheap.jpg'", button)
         self.assertNotIn("expensive.jpg", button)
         self.assertNotIn("old.jpg", button)
         self.assertEqual(page.count("<article class='catalog-card product-card'"), 4)
         self.assertIn("out.jpg", page)
-        self.assertIn("https://b.example/2", page)
-        self.assertIn("https://c.example/6", page)
+        self.assertIn(explore_href("https://b.example/2"), page)
+        self.assertIn(explore_href("https://c.example/6"), page)
         self.assertNotIn("2 間店", page)
         self.assertNotIn("最低 HK$", page)
         self.assertIn("HK$120 – HK$200", button)
@@ -2755,8 +3118,8 @@ class ModelGridTests(unittest.TestCase):
         sold = page[start:page.find("</article>", start)]
         self.assertIn("缺貨", sold)
         self.assertIn("HK$90", sold)
-        self.assertIn('href="/models?stock=in"', page)
-        self.assertIn('href="/models?stock=out"', page)
+        self.assertIn('href="/product?stock=in"', page)
+        self.assertIn('href="/product?stock=out"', page)
         self.assertIn("有貨 3", page)
         self.assertIn("缺貨 2", page)
         self.assertIn("class='stock-out'", page)
@@ -2776,8 +3139,10 @@ class ModelGridTests(unittest.TestCase):
         self.assertIn("BX-01", page)
         self.assertIn("Mystery blade", page)
         self.assertIn("Another mystery", page)
-        self.assertIn("現貨圖庫", page)
-        self.assertIn('href="/models?tag=BX"', page)
+        self.assertIn("<h1 class=\"page-title\">全部現貨</h1>", page)
+        self.assertIn("全部現貨 · ", page)
+        self.assertIn('href="/shop/all?stock=in">列表</a>', page)
+        self.assertIn('href="/product?tag=BX"', page)
 
     def _render_merged_models_page(self):
         return render_models_html(
@@ -2893,7 +3258,7 @@ class ModelGridTests(unittest.TestCase):
                         }
                     ]
                 )
-        button = page.split("<button type='button' class='catalog-card__hit'", 1)[1].split("</button>", 1)[0]
+        button = page.split("class='catalog-card__hit'", 1)[1].split("</a>", 1)[0]
         self.assertIn("src='/browser/assets/site__Blade__BX-01.png'", button)
         self.assertIn("<h2 class='catalog-card__name'>翔龍神劍 3-60F</h2>", button)
         self.assertNotIn("shop.jpg", button.split("onerror", 1)[0])
@@ -2931,7 +3296,7 @@ class ModelGridTests(unittest.TestCase):
                         }
                     ]
                 )
-        button = page.split("<button type='button' class='catalog-card__hit'", 1)[1].split("</button>", 1)[0]
+        button = page.split("class='catalog-card__hit'", 1)[1].split("</a>", 1)[0]
         self.assertIn("<h2 class='catalog-card__name'>暴風天馬 3-70RA</h2>", button)
         self.assertIn("/parts-images/products/BXG-47.jpg", button)
         self.assertNotIn("烈風天馬", button)
@@ -2953,7 +3318,7 @@ class ModelGridTests(unittest.TestCase):
                 }
             ]
         )
-        button = page.split("<button type='button' class='catalog-card__hit'", 1)[1].split("</button>", 1)[0]
+        button = page.split("class='catalog-card__hit'", 1)[1].split("</a>", 1)[0]
         self.assertIn("<h2 class='catalog-card__name'>旋風發射器</h2>", button)
         self.assertIn("https://beybladehub.app/accessories/raw/BX-18.webp", button)
         self.assertNotIn("某店旋風發射器", button)
@@ -2989,10 +3354,10 @@ class ModelGridTests(unittest.TestCase):
         self.assertIn("https://cdn.example/cx.jpg", page)
         self.assertNotIn("BX-01", page)
         self.assertNotIn("bx.jpg", page)
-        self.assertIn('class="filter on" href="/models?tag=CX"', page)
+        self.assertIn('class="filter on" href="/product?tag=CX"', page)
         self.assertIn("CX [1]", page)
         self.assertIn("BX [1]", page)
-        self.assertIn('href="/models?stock=in&amp;tag=CX"', page)
+        self.assertIn('href="/product?stock=in&amp;tag=CX"', page)
 
     def test_models_kuji_filter_is_separate_from_other(self):
         items = [
@@ -3017,7 +3382,7 @@ class ModelGridTests(unittest.TestCase):
         page = render_models_html(items)
         self.assertIn("一番賞 [1]", page)
         self.assertIn("other [1]", page)
-        self.assertIn('href="/models?tag=kuji"', page)
+        self.assertIn('href="/product?tag=kuji"', page)
         kuji = render_models_html(items, tag_filter="kuji")
         self.assertIn("KUJI-DMM-V2-G", kuji)
         self.assertIn("https://cdn.example/kuji.jpg", kuji)
@@ -3025,6 +3390,198 @@ class ModelGridTests(unittest.TestCase):
         other = render_models_html(items, tag_filter="other")
         self.assertIn("Mystery blade", other)
         self.assertNotIn("KUJI-DMM-V2-G", other)
+
+    def test_models_all_page_puts_kuji_and_other_last(self):
+        page = render_models_html(
+            [
+                {
+                    "sku": "bx",
+                    "shop_id": "h1",
+                    "title": "BX-01 Dran",
+                    "model": "BX-01",
+                    "price": "90",
+                    "status": "in_stock",
+                },
+                {
+                    "sku": "kuji",
+                    "shop_id": "h1",
+                    "title": "DMM 一番賞 Vol.2 G賞",
+                    "price": "80",
+                    "status": "in_stock",
+                },
+                {
+                    "sku": "misc",
+                    "shop_id": "h1",
+                    "title": "Mystery blade",
+                    "price": "40",
+                    "status": "in_stock",
+                },
+            ]
+        )
+        bx = page.index("data-model='BX-01'")
+        kuji = page.index("id='models-kuji'")
+        other = page.index("id='models-other'")
+        self.assertLess(bx, kuji)
+        self.assertLess(kuji, other)
+        self.assertIn("<h2>一番賞</h2>", page)
+        self.assertIn("<h2>other</h2>", page)
+        self.assertLess(page.index("KUJI-DMM-V2-G"), page.index("Mystery blade"))
+
+    def test_models_all_page_puts_bxg_after_main_lines(self):
+        page = render_models_html(
+            [
+                {
+                    "sku": "cx",
+                    "shop_id": "h1",
+                    "title": "CX-01",
+                    "model": "CX-01",
+                    "tag": "CX",
+                    "price": "90",
+                    "status": "in_stock",
+                },
+                {
+                    "sku": "wizard",
+                    "shop_id": "h1",
+                    "title": "BXG-43 Wizard",
+                    "model": "BXG-43",
+                    "tag": "CX",
+                    "price": "120",
+                    "status": "in_stock",
+                    "stock_changed_at": "2026-08-01 12:00:00",
+                },
+                {
+                    "sku": "eva",
+                    "shop_id": "h1",
+                    "title": "BXG-57 Evangelion",
+                    "model": "BXG-57",
+                    "tag": "CX",
+                    "price": "130",
+                    "status": "in_stock",
+                },
+                {
+                    "sku": "sushiro",
+                    "shop_id": "h1",
+                    "title": "BXA-01",
+                    "model": "BXA-01",
+                    "tag": "BX",
+                    "price": "80",
+                    "status": "in_stock",
+                },
+                {
+                    "sku": "aero",
+                    "shop_id": "h1",
+                    "title": "UX-00 翔空天馬 3-70A",
+                    "model": "UX-00:AERO:3-70A",
+                    "tag": "UX",
+                    "price": "140",
+                    "status": "in_stock",
+                },
+            ]
+        )
+        self.assertLess(page.index("data-model='CX-01'"), page.index("id='models-bxg'"))
+        self.assertLess(page.index("id='models-bxg'"), page.index("data-model='BXG-43'"))
+        self.assertLess(page.index("id='models-bxg'"), page.index("data-model='BXA-01'"))
+        self.assertLess(page.index("id='models-bxg'"), page.index("data-model='BXH-10'"))
+        self.assertIn("<h2>BX+</h2>", page)
+        self.assertIn("BX+ [4]", page)
+        self.assertIn('href="/product?tag=BXG"', page)
+        self.assertNotIn("更新 ", page)
+        filtered = render_models_html(
+            [
+                {
+                    "sku": "wizard",
+                    "shop_id": "h1",
+                    "title": "BXG-43 Wizard",
+                    "model": "BXG-43",
+                    "tag": "CX",
+                    "price": "120",
+                    "status": "in_stock",
+                },
+                {
+                    "sku": "cx",
+                    "shop_id": "h1",
+                    "title": "CX-01",
+                    "model": "CX-01",
+                    "tag": "CX",
+                    "price": "90",
+                    "status": "in_stock",
+                },
+            ],
+            tag_filter="BXG",
+        )
+        self.assertIn("data-model='BXG-43'", filtered)
+        self.assertNotIn("data-model='CX-01'", filtered)
+
+    def test_models_sort_by_publish_time_and_modal_lists_name(self):
+        import site_pages
+
+        with tempfile.TemporaryDirectory() as dest:
+            with open(os.path.join(dest, "catalog.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "products": [
+                            {
+                                "id": "BX-01",
+                                "kind": "set",
+                                "image": "/browser/assets/bx-01.png",
+                                "releaseDate": "2023-07-15",
+                            },
+                            {
+                                "id": "UX-10",
+                                "kind": "set",
+                                "image": "/browser/assets/ux-10.png",
+                                "releaseDate": "2025-01-02",
+                            },
+                        ]
+                    },
+                    fh,
+                )
+            with open(os.path.join(dest, "i18n.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "BX-01": {"zh-HK": "BX-01 翔龍神劍 3-60F"},
+                        "UX-10": {"zh-HK": "UX-10 客製化套裝"},
+                    },
+                    fh,
+                )
+            site_pages._BROWSER_CATALOG_CACHE["stamp"] = None
+            with mock.patch.object(site_pages, "browser_catalog_dir", return_value=dest):
+                page = render_models_html(
+                    [
+                        {
+                            "sku": "1",
+                            "shop_id": "h1",
+                            "shop_label": "ShopA",
+                            "title": "BX-01 old",
+                            "model": "BX-01",
+                            "price": "100",
+                            "status": "in_stock",
+                            "stock_changed_at": "2026-01-01 10:00:00",
+                        },
+                        {
+                            "sku": "2",
+                            "shop_id": "h2",
+                            "shop_label": "ShopB",
+                            "title": "UX-10 new",
+                            "model": "UX-10",
+                            "price": "200",
+                            "status": "in_stock",
+                        },
+                    ],
+                    sort_filter="new",
+                )
+        self.assertLess(page.index("data-model='UX-10'"), page.index("data-model='BX-01'"))
+        self.assertIn('class="filter on" href="/product?sort=new"', page)
+        self.assertIn("data-detail='HK$200 · 1 間店 · 發售日 2025-01-02'", page)
+        self.assertNotIn("更新 ", page)
+        self.assertIn('title.textContent=code?code+" · "+name:name', page)
+        self.assertIn("font-size:10px;letter-spacing:.04em;padding:2px 6px", page)
+        self.assertIn("width:72px;height:72px", page)
+        head_at = page.index('<div class="model-modal__head">')
+        close_at = page.index('<button type="button" class="model-modal__close"')
+        scroll_at = page.index('<div class="model-modal__scroll">')
+        self.assertLess(head_at, close_at)
+        self.assertLess(close_at, scroll_at)
 
     def test_models_stock_filter_keeps_matching_offers(self):
         items = [
@@ -3064,28 +3621,263 @@ class ModelGridTests(unittest.TestCase):
         ]
         instock = render_models_html(items, stock_filter="in_stock")
         self.assertEqual(instock.count("<article class='catalog-card product-card'"), 1)
-        self.assertIn("https://a.example/1", instock)
-        self.assertNotIn("https://b.example/2", instock)
+        self.assertIn(explore_href("https://a.example/1"), instock)
+        self.assertIn(explore_href("https://b.example/2"), instock)
         self.assertNotIn("UX-10", instock)
-        self.assertIn('class="filter on" href="/models?stock=in"', instock)
-        self.assertIn('href="/models?stock=in&amp;tag=BX"', instock)
-        self.assertIn("HK$200", instock)
-        self.assertNotIn("HK$50", instock)
+        self.assertIn('class="filter on" href="/product?stock=in"', instock)
+        self.assertIn('href="/product?stock=in&amp;tag=BX"', instock)
+        self.assertIn("catalog-card__subtitle price-in", instock)
+        self.assertIn("<span class='price-in'>HK$200</span>", instock)
+        self.assertIn("<span class='price-out'>HK$50</span>", instock)
         soldout = render_models_html(items, stock_filter="out_of_stock")
         self.assertEqual(soldout.count("<article class='catalog-card product-card'"), 2)
         self.assertIn("UX-10", soldout)
-        self.assertIn("https://b.example/2", soldout)
-        self.assertNotIn("https://a.example/1", soldout)
-        self.assertIn('class="filter on" href="/models?stock=out"', soldout)
+        self.assertIn(explore_href("https://b.example/2"), soldout)
+        self.assertIn(explore_href("https://a.example/1"), soldout)
+        self.assertIn("catalog-card__subtitle price-out", soldout)
+        self.assertIn('class="filter on" href="/product?stock=out"', soldout)
         both = render_models_html(items, tag_filter="UX", stock_filter="out_of_stock")
         self.assertIn("UX-10", both)
         self.assertNotIn("BX-01", both)
-        self.assertIn('class="filter on" href="/models?stock=out&amp;tag=UX"', both)
+        self.assertIn('class="filter on" href="/product?stock=out&amp;tag=UX"', both)
+
+    def test_product_page_splits_tclub_and_takara_tomy_mall(self):
+        items = [
+            {
+                "sku": "hk",
+                "shop_id": "hobby",
+                "shop_label": "HobbyLand",
+                "title": "BX-01 Dran",
+                "model": "BX-01",
+                "tag": "BX",
+                "price": "100",
+                "status": "in_stock",
+            },
+            {
+                "sku": "tc",
+                "shop_id": "tclub",
+                "shop_label": "TClub",
+                "title": "CX-09 TClub",
+                "model": "CX-09",
+                "tag": "CX",
+                "price": "88",
+                "status": "in_stock",
+            },
+            {
+                "sku": "tc-only",
+                "shop_id": "tclub",
+                "shop_label": "TClub",
+                "title": "CX-00:S4-70V",
+                "model": "CX-00:S4-70V",
+                "tag": "CX",
+                "price": "99",
+                "status": "in_stock",
+            },
+            {
+                "sku": "tc-shared",
+                "shop_id": "tclub",
+                "shop_label": "TClub",
+                "title": "BX-00:4-60F",
+                "model": "BX-00:4-60F",
+                "tag": "BX",
+                "price": "120",
+                "status": "in_stock",
+            },
+            {
+                "sku": "hk-shared",
+                "shop_id": "hobby",
+                "shop_label": "HobbyLand",
+                "title": "BX-00:4-60F",
+                "model": "BX-00:4-60F",
+                "tag": "BX",
+                "price": "130",
+                "status": "in_stock",
+            },
+            {
+                "sku": "tc-plus",
+                "shop_id": "tclub",
+                "shop_label": "TClub",
+                "title": "BXG-47 only here",
+                "model": "BXG-47",
+                "tag": "BXG",
+                "price": "150",
+                "status": "in_stock",
+            },
+            {
+                "sku": "mall",
+                "shop_id": "takaratomymall",
+                "shop_label": "Takara Tomy Mall",
+                "title": "【抽選】【アプリ・イベント限定】UX-04 Mall",
+                "model": "UX-04",
+                "tag": "UX",
+                "price": "1980",
+                "status": "in_stock",
+                "status_label": "有貨（抽選）",
+                "remark": "抽選",
+            },
+        ]
+        page = render_models_html(items, shops=[])
+        self.assertIn("id='models-tclub'", page)
+        tclub = page.split("id='models-tclub'", 1)[1].split("</section>", 1)[0]
+        mall = page.split("id='models-takaratomymall'", 1)[1].split("</section>", 1)[0]
+        main = page.split("id='models-tclub'", 1)[0]
+        self.assertIn("<h2>TClub</h2>", tclub)
+        self.assertIn("data-model='CX-00:S4-70V'", tclub)
+        self.assertIn("data-model='BXG-47'", tclub)
+        self.assertNotIn("data-model='CX-09'", tclub)
+        self.assertNotIn("data-model='BX-00:4-60F'", tclub)
+        self.assertNotIn("data-model='BX-01'", tclub)
+        self.assertIn("data-model='CX-09'", main)
+        self.assertIn("data-model='BX-00:4-60F'", main)
+        self.assertIn("<h2>Takara Tomy Mall</h2>", mall)
+        self.assertIn("data-model='UX-04'", mall)
+        visible = mall.split("model-offer-list", 1)[0]
+        self.assertIn("sale-tag--raffle", visible)
+        self.assertIn(">抽選<", visible)
+        self.assertIn("sale-tag--event", visible)
+        self.assertIn("App/活動限定", visible)
+        self.assertNotIn("data-model='UX-04'", main)
+        self.assertLess(page.index("id='models-tclub'"), page.index("id='models-takaratomymall'"))
+        from site_pages import render_model_detail_html
+
+        detail = render_model_detail_html("UX-04", items)
+        self.assertIn("sale-tag--raffle", detail)
+        self.assertIn(">抽選<", detail)
+        self.assertIn("App/活動限定", detail)
+        focused = render_models_html(items, shop_filter="tclub", shops=[])
+        self.assertNotIn("id='models-tclub'", focused)
+        self.assertIn("data-model='CX-09'", focused)
+        self.assertNotIn("data-model='UX-04'", focused)
+
+    def test_amazon_us_retail_is_a_us_edition_section(self):
+        items = [
+            {
+                "sku": "hk",
+                "shop_id": "hobby",
+                "title": "BX-01 Dran",
+                "model": "BX-01",
+                "tag": "BX",
+                "price": "100",
+                "status": "in_stock",
+            },
+            {
+                "sku": "us-bx",
+                "shop_id": "amazon-us-retail",
+                "title": "Beyblade X BX-01 Dran Sword",
+                "model": "BX-01",
+                "tag": "BX",
+                "price": "14.99",
+                "status": "in_stock",
+            },
+            {
+                "sku": "us-other",
+                "shop_id": "amazon-us-retail",
+                "title": "Beyblade X Clash & Carry Beystadium",
+                "model": "",
+                "tag": "other",
+                "price": "49.99",
+                "status": "in_stock",
+            },
+        ]
+        page = render_models_html(items, shops=[])
+        us = page.split("id='models-amazon-us-retail'", 1)[1].split("</section>", 1)[0]
+        main = page.split("id='models-amazon-us-retail'", 1)[0]
+        self.assertIn("<h2>美版</h2>", us)
+        self.assertIn("data-sku='us-bx'", us)
+        self.assertIn("data-sku='us-other'", us)
+        self.assertIn("data-model=''", us)
+        self.assertNotIn(">/product/BX-01<", us)
+        self.assertNotIn("href='/product/BX-01'", us)
+        self.assertIn("Beyblade X BX-01 Dran Sword", us)
+        self.assertIn("data-model='BX-01'", main)
+        self.assertNotIn("data-sku='us-bx'", main)
+        self.assertNotIn("data-sku='us-other'", main)
+        bx = render_models_html(items, tag_filter="BX", shops=[])
+        self.assertIn("data-sku='hk'", bx)
+        self.assertNotIn("id='models-amazon-us-retail'", bx)
+        self.assertNotIn("data-sku='us-bx'", bx)
+        focused = render_models_html(items, shop_filter="amazon-us-retail", shops=[])
+        self.assertEqual(focused.count("id='models-amazon-us-retail'"), 1)
+        self.assertIn("<h2>美版</h2>", focused)
+        self.assertNotIn("id='models-bxg'", focused)
+        self.assertNotIn("id='models-other'", focused)
+        self.assertNotIn(">CX [", focused)
+        self.assertNotIn(">BX [", focused)
+        self.assertNotIn(">UX [", focused)
+        self.assertIn("data-sku='us-bx'", focused)
+        self.assertIn("data-sku='us-other'", focused)
+        self.assertIn("data-model=''", focused)
+        self.assertNotIn("data-sku='hk'", focused)
+        from site_data import group_tag_key, product_line_fields, product_tag_key
+        from site_pages import render_model_detail_html
+
+        us_item = items[1]
+        self.assertEqual(listing_model_code(us_item), "")
+        self.assertEqual(product_tag_key(us_item), "")
+        self.assertEqual(product_line_fields(us_item), {"model": "", "tag": "other"})
+        self.assertEqual(group_tag_key({"model": "BX-01", "items": [us_item]}), "")
+        detail = render_model_detail_html("BX-01", items)
+        self.assertNotIn("Beyblade X BX-01 Dran Sword", detail or "")
+        self.assertIn("BX-01 Dran", detail or "")
+
+    def test_product_page_shop_grid_filters_models(self):
+        shops = [
+            {"id": "hobby", "label": "HobbyLand"},
+            {"id": "amazon", "label": "Amazon.co.jp 直販"},
+        ]
+        items = [
+            {
+                "sku": "1",
+                "shop_id": "hobby",
+                "title": "BX-01 Dran",
+                "model": "BX-01",
+                "tag": "BX",
+                "price": "100",
+                "status": "in_stock",
+            },
+            {
+                "sku": "2",
+                "shop_id": "amazon",
+                "title": "CX-02 Wizard",
+                "model": "CX-02",
+                "tag": "CX",
+                "price": "200",
+                "status": "in_stock",
+            },
+        ]
+        page = render_models_html(items, shops=shops)
+        self.assertIn('id="all-stock"', page)
+        self.assertIn('class="model-filters"', page)
+        self.assertNotIn(">全部現貨</p>", page)
+        self.assertEqual(page.count('class="filter-combo shop-chips"'), 1)
+        self.assertNotIn(">海外店舖</p>", page)
+        self.assertIn('value="全部現貨"', page)
+        self.assertIn('href="/product" data-label="全部現貨"', page)
+        self.assertIn('href="/product?shop=hobby" data-label="HobbyLand"', page)
+        self.assertIn('href="/product?shop=amazon"', page)
+        self.assertIn('<h1 class="page-title">全部現貨</h1>', page)
+        self.assertIn('class="filter on" href="/product">圖庫</a>', page)
+        self.assertIn('href="/shop/all?stock=in">列表</a>', page)
+        listed = render_models_html(items, stock_filter="in_stock", shops=shops, layout="list")
+        self.assertIn("class='sku-row product-card'", listed)
+        self.assertNotIn("<div class='model-grid'", listed)
+        self.assertIn('href="/shop/all?stock=in" data-label="全部現貨"', listed)
+        self.assertIn('href="/shop/all?stock=in&amp;shop=amazon"', listed)
+        self.assertIn('class="filter on" href="/shop/all?stock=in">列表</a>', listed)
+        self.assertIn('href="/product">圖庫</a>', listed)
+        self.assertIn("noindex, nofollow", listed)
+        filtered = render_models_html(items, shop_filter="hobby", shops=shops)
+        self.assertIn("BX-01", filtered)
+        self.assertNotIn("CX-02", filtered)
+        self.assertIn('value="HobbyLand"', filtered)
+        self.assertIn('class="filter on" href="/product?shop=hobby"', filtered)
+        self.assertIn('href="/product?stock=in&amp;shop=hobby"', filtered)
+        self.assertIn("noindex, nofollow", filtered)
 
     def test_nav_links_model_grid_and_stock_list_stays_rows(self):
         nav = site_nav_html()
-        self.assertIn('href="/models">現貨圖庫</a>', nav)
-        self.assertIn('href="/shop/all?stock=in"', nav)
+        self.assertIn('href="/product">全部現貨</a>', nav)
+        self.assertIn('href="/shop/all?stock=in">列表</a>', nav)
         page = render_products_html(
             {"id": "all", "label": "全部"},
             [
@@ -3108,7 +3900,353 @@ class ModelGridTests(unittest.TestCase):
 
     def test_sitemap_includes_models_page(self):
         xml = sitemap_xml({"sources": []})
-        self.assertIn("https://hkbeybladex.com/models", xml)
+        self.assertIn("https://hkbeybladex.com/product", xml)
+
+    def test_sitemap_lists_browser_items_from_catalog(self):
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "catalog.json"), "w", encoding="utf-8") as fh:
+                json.dump({"products": [{"id": "BX-01"}], "parts": []}, fh)
+            xml = sitemap_xml({"sources": []}, browser_catalog_dir_override=td)
+        self.assertIn("https://hkbeybladex.com/browser/item/BX-01", xml)
+        self.assertIn("https://hkbeybladex.com/browser<", xml)
+
+    def test_model_detail_page_is_indexable_product(self):
+        import parts_catalog
+        import site_pages
+        from site_pages import render_model_detail_html
+
+        with tempfile.TemporaryDirectory() as dest:
+            with open(os.path.join(dest, "products.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "BX-52": {
+                            "id": "BX-52",
+                            "name_zh": "輝耀龍騎士（BX-52）",
+                            "name_en": "Wizard Arrow",
+                            "jan": "4904810085553",
+                            "description": "左迴旋攻擊型入門組。",
+                            "released_on": "2026-10-10",
+                            "bey_type": "攻擊型",
+                            "stock_combo": "6-60LC",
+                        }
+                    },
+                    fh,
+                )
+            site_pages._CATALOG_PRODUCT_CACHE["stamp"] = None
+            with mock.patch.object(parts_catalog, "PARTS_DIR", dest):
+                page = render_model_detail_html(
+                    "BX-52",
+                    [
+                        {
+                            "sku": "1",
+                            "shop_id": "h1",
+                            "shop_label": "ShopA",
+                            "title": "BX-52",
+                            "model": "BX-52",
+                            "price": "188",
+                            "url": "https://a.example/1",
+                            "status": "in_stock",
+                        }
+                    ],
+                )
+                missing = render_model_detail_html("NOPE", [])
+                xml = sitemap_xml({"sources": []})
+        self.assertIsNone(missing)
+        self.assertIn(
+            "<title>BX-52 輝耀龍騎士 Wizard Arrow 香港現貨 · HK BeybladeX Watch</title>",
+            page,
+        )
+        self.assertIn('content="index, follow"', page)
+        self.assertNotIn("noindex", page)
+        self.assertIn('href="https://hkbeybladex.com/product/BX-52"', page)
+        self.assertIn('"@type": "Product"', page)
+        self.assertIn("AggregateOffer", page)
+        self.assertIn("HKD", page)
+        self.assertIn("4904810085553", page)
+        self.assertIn("ShopA", page)
+        self.assertIn("左迴旋攻擊型入門組", page)
+        self.assertIn("https://hkbeybladex.com/product/BX-52", xml)
+
+    def test_model_detail_uses_browser_item_layout(self):
+        import parts_catalog
+        import site_pages
+        from site_pages import render_model_detail_html
+
+        with tempfile.TemporaryDirectory() as dest, tempfile.TemporaryDirectory() as parts:
+            with open(os.path.join(dest, "catalog.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "products": [
+                            {
+                                "id": "BX-44",
+                                "kind": "set",
+                                "line": "BX",
+                                "manufacturer": "tt",
+                                "description": {"zh-HK": "高穩定性的刃擊環。"},
+                                "price": "¥1,500",
+                                "releaseDate": "2025-06-27",
+                                "partIds": ["BL-1"],
+                                "image": "/browser/assets/set.png",
+                                "shops": [
+                                    {
+                                        "label": "Takara Tomy",
+                                        "url": "https://beyblade.takaratomy.co.jp/beyblade-x/lineup/bx44.html",
+                                    }
+                                ],
+                            },
+                            {
+                                "id": "BX44",
+                                "kind": "package",
+                                "image": "/browser/assets/pack-0.jpg",
+                                "images": [
+                                    "/browser/assets/pack-0.jpg",
+                                    "/browser/assets/pack-1.png",
+                                ],
+                                "partIds": ["BX-44"],
+                            },
+                        ],
+                        "parts": [
+                            {
+                                "id": "BL-1",
+                                "kind": "blade",
+                                "image": "/browser/assets/blade.png",
+                            }
+                        ],
+                    },
+                    fh,
+                )
+            with open(os.path.join(dest, "i18n.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "BX-44": {"zh-HK": "BX-44 三角龍壓M-85BS", "en": "BX-44 TRICERAPRESS"},
+                        "BL-1": {"zh-HK": "三角龍壓刃", "en": "Tricerapress blade"},
+                    },
+                    fh,
+                )
+            with open(os.path.join(dest, "stock-history.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "byCode": {
+                            "BX44": [
+                                {
+                                    "shop": "ShopA",
+                                    "at": "2026-06-01T10:00:00Z",
+                                    "title": "三角龍壓到貨",
+                                    "price": "188",
+                                    "url": "https://shop.example/bx44",
+                                }
+                            ]
+                        }
+                    },
+                    fh,
+                )
+            with open(os.path.join(parts, "products.json"), "w", encoding="utf-8") as fh:
+                json.dump({}, fh)
+            site_pages._CATALOG_PRODUCT_CACHE["stamp"] = None
+            site_pages._BROWSER_DETAIL_CACHE["records"] = None
+            site_pages._STOCK_HISTORY_CACHE["by_code"] = None
+            with mock.patch.object(parts_catalog, "PARTS_DIR", parts), mock.patch.object(
+                site_pages, "browser_catalog_dir", return_value=dest
+            ):
+                page = render_model_detail_html(
+                    "BX-44",
+                    [
+                        {
+                            "sku": "939528",
+                            "shop_id": "h1",
+                            "shop_label": "ShopA",
+                            "title": "BX-44 三角龍壓",
+                            "model": "BX-44",
+                            "price": "188",
+                            "url": "https://shop.example/bx44",
+                            "image": "https://shop.example/bx44.jpg",
+                            "status": "in_stock",
+                        }
+                    ],
+                )
+        self.assertIn("<h1>BX-44 三角龍壓M-85BS</h1>", page)
+        self.assertEqual(page.count("<h1>"), 1)
+        self.assertIn(
+            "<title>BX-44 三角龍壓M-85BS 香港現貨 · HK BeybladeX Watch</title>",
+            page,
+        )
+        self.assertIn('content="index, follow"', page)
+        self.assertIn('href="https://hkbeybladex.com/product/BX-44"', page)
+        self.assertIn("高穩定性的刃擊環", page)
+        self.assertIn("套組", page)
+        self.assertIn("亞版", page)
+        self.assertIn("香港現價", page)
+        self.assertIn("1 間有貨", page)
+        self.assertIn("src='/browser/assets/pack-0.jpg'", page)
+        self.assertIn("src='/browser/assets/pack-1.png'", page)
+        self.assertIn("href='/browser/item/BL-1'", page)
+        self.assertIn("三角龍壓刃", page)
+        self.assertIn("Takara Tomy", page)
+        self.assertIn(explore_href("https://beyblade.takaratomy.co.jp/beyblade-x/lineup/bx44.html"), page)
+        self.assertIn(explore_href("https://shop.example/bx44"), page)
+        self.assertIn("香港店舖庫存", page)
+        self.assertIn("model-stock--photo", page)
+        self.assertIn("src='https://shop.example/bx44.jpg'", page)
+        self.assertIn("入貨紀錄", page)
+        self.assertIn("三角龍壓到貨", page)
+        self.assertIn("HK$188", page)
+        self.assertIn("2026-06-01T10:00", page)
+        match = re.search(r'<script type="application/ld\+json">(.*?)</script>', page)
+        product = next(
+            node
+            for node in json.loads(match.group(1))["@graph"]
+            if node.get("@type") == "Product"
+        )
+        self.assertIsInstance(product["image"], list)
+        self.assertGreaterEqual(len(product["image"]), 2)
+        self.assertTrue(any(url.endswith("pack-0.jpg") for url in product["image"]))
+        self.assertTrue(any(url.endswith("pack-1.png") for url in product["image"]))
+        self.assertIn("AggregateOffer", page)
+        self.assertIn("BreadcrumbList", page)
+
+    def test_umbrella_variant_detail_accepts_colon_code(self):
+        from site_pages import public_model_code, render_model_detail_html
+
+        page = render_model_detail_html(
+            "CX-00%3AS4-70V",
+            [
+                {
+                    "sku": "4904810954316",
+                    "shop_id": "takaratomymall",
+                    "shop_label": "Takara Tomy Mall",
+                    "title": "BEYBLADE X CX-00 S4-70V",
+                    "model": "CX-00:S4-70V",
+                    "price": "1800",
+                    "url": "https://takaratomymall.jp/shop/g/g4904810954316/",
+                    "status": "in_stock",
+                }
+            ],
+        )
+        self.assertIsNotNone(page)
+        self.assertIn("/product/CX-00%3AS4-70V", page)
+        self.assertIn("Takara Tomy Mall", page)
+        self.assertIn("4904810954316", page)
+        self.assertEqual(public_model_code("CX-00:限定S6-60V"), "CX-00:限定S6-60V")
+        self.assertEqual(public_model_code("CX-00/S4-70V"), "")
+        self.assertEqual(public_model_code("CX-00:../S4"), "")
+
+    def test_models_grid_links_detail_and_keeps_mobile_modal(self):
+        page = render_models_html(
+            [
+                {
+                    "sku": "1",
+                    "shop_id": "h1",
+                    "title": "BX-01 Dran Sword",
+                    "model": "BX-01",
+                    "price": "100",
+                    "status": "in_stock",
+                }
+            ]
+        )
+        self.assertIn("href='/product/BX-01'", page)
+        self.assertIn("(min-width:960px)", page)
+        self.assertIn('id="model-modal-page"', page)
+        self.assertIn("查看詳情", page)
+        self.assertIn("preventDefault", page)
+        self.assertIn("ItemList", page)
+
+
+class ExploreRedirectTests(unittest.TestCase):
+    def test_explore_href_wraps_external_and_keeps_our_pages(self):
+        shop = "https://shop.example/bx44"
+        wrapped = explore_href(shop)
+        self.assertTrue(wrapped.startswith("/explore/?url="))
+        self.assertIn("shop.example", wrapped)
+        self.assertEqual(explore_href("/product/BX-01"), "/product/BX-01")
+        self.assertEqual(
+            explore_href("https://hkbeybladex.com/go/uat/test"),
+            "https://hkbeybladex.com/go/uat/test",
+        )
+        self.assertEqual(explore_href("https://cdn.hkbeybladex.com/images/a.jpg"), "https://cdn.hkbeybladex.com/images/a.jpg")
+        self.assertEqual(explore_href("javascript:alert(1)"), "javascript:alert(1)")
+
+    def test_explore_rejects_bad_targets(self):
+        self.assertEqual(explore_http_result("")["status"], 404)
+        self.assertEqual(explore_http_result("url=javascript:alert(1)")["status"], 404)
+        self.assertEqual(
+            explore_http_result("url=https://user:pass@shop.example/x")["status"],
+            404,
+        )
+        self.assertEqual(
+            explore_http_result("url=https://hkbeybladex.com/product/BX-01")["status"],
+            404,
+        )
+        self.assertEqual(
+            explore_http_result("url=https://www.hkbeybladex.com/explore/?url=1")["status"],
+            404,
+        )
+
+    def test_visitor_redirects_after_half_second_and_bot_keeps_product_data(self):
+        import urllib.parse
+
+        dest = "https://www.buymarkettoy.com/products/x"
+        query = "url=" + urllib.parse.quote(dest, safe="")
+        items = [
+            {
+                "title": "BX-34",
+                "sku": "BY914563",
+                "shop_id": "buymarkettoy",
+                "url": dest,
+                "image": "https://cdn.example/x.jpg",
+                "price": "159.00",
+                "status_label": "有貨",
+            }
+        ]
+        human = explore_http_result(query, user_agent="Mozilla/5.0", items=items)
+        self.assertEqual(human["status"], 200)
+        self.assertEqual(human["cache"], "private, no-store")
+        self.assertEqual(human["location"], dest)
+        self.assertIn("setTimeout(go, 500)", human["html"])
+        self.assertIn("location.replace(dest)", human["html"])
+        self.assertIn(dest, human["html"])
+        self.assertIn("go-loading", human["html"])
+        self.assertNotIn("go-card", human["html"])
+        self.assertNotIn("class='thumb'", human["html"])
+
+        bot = explore_http_result(query, user_agent="TelegramBot (like TwitterBot)", items=items)
+        self.assertEqual(bot["status"], 200)
+        self.assertIn("BX-34", bot["html"])
+        self.assertIn("HK$159.00", bot["html"])
+        self.assertIn("有貨", bot["html"])
+        self.assertIn("https://cdn.example/x.jpg", bot["html"])
+        self.assertIn("class='thumb'", bot["html"])
+        cached = explore_http_result(
+            query,
+            user_agent="TelegramBot (like TwitterBot)",
+            items=[
+                dict(
+                    items[0],
+                    image_path="images/buymarkettoy/BY914563.jpg",
+                )
+            ],
+        )
+        self.assertIn("class='thumb'", cached["html"])
+        self.assertIn("/images/buymarkettoy/BY914563.jpg", cached["html"])
+        self.assertNotIn("location.replace(dest)", bot["html"])
+        self.assertNotIn("setTimeout(go, 500)", bot["html"])
+        self.assertIn(
+            'property="og:url" content="https://hkbeybladex.com/explore/?url=',
+            bot["html"],
+        )
+        self.assertIn(urllib.parse.quote(dest, safe=""), bot["html"])
+
+    def test_unknown_destination_still_shows_host_to_bots(self):
+        import urllib.parse
+
+        dest = "https://beyblade.takaratomy.co.jp/beyblade-x/lineup/bx44.html"
+        result = explore_http_result(
+            "url=" + urllib.parse.quote(dest, safe=""),
+            user_agent="facebookexternalhit/1.1",
+            items=[],
+        )
+        self.assertEqual(result["status"], 200)
+        self.assertIn("beyblade.takaratomy.co.jp", result["html"])
+        self.assertNotIn("location.replace(dest)", result["html"])
 
 
 if __name__ == "__main__":

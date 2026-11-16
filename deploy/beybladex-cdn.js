@@ -40,7 +40,10 @@ export default {
     const upstream = ORIGIN + url.pathname;
     const resp = await fetch(upstream, {
       method: request.method,
-      cf: { cacheTtl: 31536000, cacheEverything: true },
+      cf: {
+        cacheEverything: true,
+        cacheTtlByStatus: { "200-299": 31536000, "300-599": 0 },
+      },
     });
     const headers = new Headers(resp.headers);
     headers.set("Access-Control-Allow-Origin", "*");

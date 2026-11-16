@@ -295,10 +295,10 @@ def filter_catalog_products(products, line="", tag="", q="", kind=""):
     return rows
 
 
-def _page(title, path, inner, extra_style="", indexable=False):
+def _page(title, path, inner, extra_style="", indexable=False, canonical_url=None, description=None):
     from site_pages import page_seo_head, page_theme_css, site_nav_html, subscribe_script, filter_combo_script
 
-    desc = "Beyblade X 圖鑑與本機零件庫"
+    desc = description or "Beyblade X 圖鑑與本機零件庫"
     return """<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -328,7 +328,7 @@ font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.12em;text-t
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, path, indexable=indexable),
+        page_seo_head(title, desc, path, indexable=indexable, canonical_url=canonical_url),
         page_theme_css(),
         extra_style,
         site_nav_html(),
@@ -439,9 +439,12 @@ def _facts_html(pairs):
 def _text_or_link(href, label):
     if not href:
         return html.escape(label) if label else ""
-    extra = " target='_blank' rel='noopener'" if str(href).startswith("http") else ""
+    from site_data import explore_href
+
+    dest = explore_href(href)
+    extra = " target='_blank' rel='noopener'" if str(dest).startswith("/explore/") or str(href).startswith("http") else ""
     return "<a href='%s'%s>%s</a>" % (
-        html.escape(href, quote=True),
+        html.escape(dest, quote=True),
         extra,
         html.escape(label or href),
     )
@@ -487,7 +490,7 @@ def _listing_status_html(listing):
 
 
 def _shop_rows_html(catalog, product_id):
-    from site_data import go_href
+    from site_data import go_href, shown_price_text
 
     rows = []
     for listing in listings_for_product(catalog, product_id):
@@ -497,7 +500,7 @@ def _shop_rows_html(catalog, product_id):
         href = listing.get("url") or ""
         if not href and shop and sku:
             href = go_href(shop, sku)
-        price = _format_hkd(listing.get("price"))
+        price = shown_price_text(listing)
         status = _listing_status_html(listing)
         sub = " · ".join(
             part
@@ -792,7 +795,18 @@ def render_catalog_product_html(catalog, product_id):
         + ("\n".join(part_rows) or "<p>沒有零件資料</p>")
         + "</div></section>"
     )
-    return _page(name, "/catalog/" + product_id, inner, extra_style=CATALOG_GRID_CSS)
+    from site_data import page_canonical
+
+    return _page(
+        name,
+        "/catalog/" + product_id,
+        inner,
+        extra_style=CATALOG_GRID_CSS,
+        indexable=True,
+        canonical_url=page_canonical(
+            "/product/" + urllib.parse.quote(str(product_id), safe="-._")
+        ),
+    )
 
 
 def render_parts_html(catalog, slot=""):

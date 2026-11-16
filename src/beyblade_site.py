@@ -41,6 +41,7 @@ from site_data import (
     filter_index_notifies,
     filter_notify_dates,
     history_query_dates,
+    explore_http_result,
     go_http_result,
     go_shop_landing_id,
     image_data_dir,
@@ -55,8 +56,12 @@ from site_data import (
     shop_chip_shops,
     shop_page_meta,
     start_listing_watch_loop,
+    product_path_redirect,
+    shop_list_redirect,
     status_request_redirect,
     status_settings,
+    shop_filter_from_query,
+    sort_filter_from_query,
     stock_filter_from_query,
     tag_filter_from_query,
 )
@@ -64,6 +69,7 @@ from site_pages import (
     render_admin_login_html,
     render_coffee_html,
     render_history_html,
+    render_model_detail_html,
     render_models_html,
     render_notify_test_html,
     render_og_test_html,
@@ -225,11 +231,25 @@ def start_status_server():
             self.do_GET()
 
         def do_GET(self):
+            shop_moved = shop_list_redirect(self.path)
+            if shop_moved:
+                self.send_response(301)
+                self.send_header("Location", shop_moved)
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                return
             redirect = status_request_redirect(self.path)
             if redirect is not None:
                 self.send_response(302)
                 self.send_header("Location", redirect)
                 self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            moved = product_path_redirect(self.path)
+            if moved:
+                self.send_response(301)
+                self.send_header("Location", moved)
+                self.send_header("Cache-Control", "public, max-age=86400")
                 self.end_headers()
                 return
             parsed = urllib.parse.urlparse(self.path)
@@ -260,7 +280,7 @@ def start_status_server():
                 self._bytes(
                     200,
                     "text/plain; charset=utf-8",
-                    robots_txt().encode("utf-8"),
+                    robots_txt(host=host).encode("utf-8"),
                 )
                 return
             if parsed.path == "/sitemap.xml":
@@ -288,6 +308,21 @@ def start_status_server():
                     body = fh.read()
                 ctype = "image/jpeg" if full.endswith(".jpg") else "image/png"
                 self._bytes(200, ctype, body, cache=IMAGE_CACHE_CONTROL)
+                return
+            if parsed.path in ("/explore", "/explore/"):
+                result = explore_http_result(
+                    query=parsed.query,
+                    user_agent=self.headers.get("User-Agent") or "",
+                )
+                if result.get("status") == 404:
+                    self.send_error(404)
+                    return
+                self._bytes(
+                    200,
+                    "text/html; charset=utf-8",
+                    result["html"].encode("utf-8"),
+                    cache=result.get("cache") or "private, no-store",
+                )
                 return
             go = parse_go_path(parsed.path) or go_shop_landing_id(parsed.path)
             if go:
@@ -399,6 +434,7 @@ def start_status_server():
                     "text/html; charset=utf-8",
                     render_notify_test_html().encode("utf-8"),
                     cache="no-store",
+                    robots="noindex, nofollow",
                 )
                 return
             if parsed.path in ("/status.json", "/json"):
@@ -411,9 +447,11 @@ def start_status_server():
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if parsed.path == "/models":
+            if parsed.path == "/product":
                 tag_filter = tag_filter_from_query(parsed.query)
                 stock_filter = stock_filter_from_query(parsed.query)
+                sort_filter = sort_filter_from_query(parsed.query)
+                shop_filter = shop_filter_from_query(parsed.query)
                 cache_key = parsed.path + "?" + parsed.query
 
                 def _models_page():
@@ -421,16 +459,48 @@ def start_status_server():
                         load_shop_products_for_shop_id("all"),
                         tag_filter=tag_filter,
                         stock_filter=stock_filter,
+                        sort_filter=sort_filter,
+                        shop_filter=shop_filter,
                     ).encode("utf-8")
 
                 body = cached_bytes(cache_key, _models_page)
-                robots = None if not tag_filter and not stock_filter else "noindex, nofollow"
+                robots = (
+                    None
+                    if not tag_filter and not stock_filter and not sort_filter and not shop_filter
+                    else "noindex, nofollow"
+                )
                 self._bytes(
                     200,
                     "text/html; charset=utf-8",
                     body,
                     cache=HTML_CACHE_CONTROL,
                     robots=robots,
+                )
+                return
+            if parsed.path.startswith("/product/"):
+                code = urllib.parse.unquote(parsed.path[len("/product/"):].strip("/"))
+                if not code or "/" in code:
+                    self.send_error(404)
+                    return
+                cache_key = parsed.path
+
+                def _model_page():
+                    page = render_model_detail_html(
+                        code, load_shop_products_for_shop_id("all")
+                    )
+                    if not page:
+                        return b""
+                    return page.encode("utf-8")
+
+                body = cached_bytes(cache_key, _model_page)
+                if not body:
+                    self.send_error(404)
+                    return
+                self._bytes(
+                    200,
+                    "text/html; charset=utf-8",
+                    body,
+                    cache=HTML_CACHE_CONTROL,
                 )
                 return
             if parsed.path.startswith("/shop/"):
@@ -442,6 +512,29 @@ def start_status_server():
                 stock_filter = stock_filter_from_query(parsed.query)
                 tag_filter = tag_filter_from_query(parsed.query)
                 cache_key = parsed.path + "?" + parsed.query
+                if shop_id == "all" and stock_filter == "in_stock":
+                    sort_filter = sort_filter_from_query(parsed.query)
+                    shop_filter = shop_filter_from_query(parsed.query)
+
+                    def _stock_list_page():
+                        return render_models_html(
+                            load_shop_products_for_shop_id("all"),
+                            tag_filter=tag_filter,
+                            stock_filter=stock_filter,
+                            sort_filter=sort_filter,
+                            shop_filter=shop_filter,
+                            layout="list",
+                        ).encode("utf-8")
+
+                    body = cached_bytes(cache_key, _stock_list_page)
+                    self._bytes(
+                        200,
+                        "text/html; charset=utf-8",
+                        body,
+                        cache=HTML_CACHE_CONTROL,
+                        robots="noindex, nofollow",
+                    )
+                    return
 
                 def _shop_page():
                     return render_products_html(

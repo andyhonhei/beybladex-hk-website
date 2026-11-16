@@ -35,6 +35,7 @@ from site_data import (
     SEO_IMAGE_PATH,
     SITE_BRAND,
     SITE_BRAND_SHORT,
+    SITE_META_KEYWORDS,
     SITE_ORIGIN,
     image_data_dir,
     SUBSCRIBE_BUTTON_LABEL,
@@ -56,10 +57,22 @@ from site_data import (
     filter_shops_by_notify_src,
     filter_shop_products,
     find_source_by_id,
+    _canonical_model_code,
     group_listings_by_model,
     group_tag_key,
+    format_yen_with_hkd,
+    format_jpy_retail_with_hkd,
+    format_usd_with_hkd,
+    shown_price_text,
+    amazon_jp_retail_price,
+    usd_to_hkd,
+    item_currency_code,
+    item_uses_jpy,
+    jpy_to_hkd,
+    listing_hkd_value,
+    listing_model_code,
     listing_price_value,
-    listing_rank,
+    explore_href,
     go_canonical_url,
     go_path,
     home_seo_description,
@@ -87,10 +100,16 @@ from site_data import (
     seo_image_url,
     shop_chip_shops,
     shop_page_meta,
+    sources_for_shop_page,
     shop_products_href,
+    skips_line_model,
     stock_status,
     status_text,
 )
+
+def outbound_href(url):
+    return html.escape(explore_href(url), quote=True)
+
 
 def page_theme_css():
     return """
@@ -246,6 +265,12 @@ background:#fff;color:var(--ink);border:1px solid var(--ink)}
 font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase}
 .filter-combo-list a:hover,.filter-combo-list a.on{background:var(--ink);color:#fff}
 .filter-combo-list a[hidden]{display:none}
+.model-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 12px}
+.model-filters .filters{margin:0;gap:6px}
+.model-filters .filters a{padding:6px 9px}
+.model-filters #all-stock{flex:1 1 200px;max-width:240px;min-width:0}
+.model-filters .filter-combo{margin:0;max-width:none;width:100%}
+@media(max-width:640px){.model-filters #all-stock{flex-basis:100%;max-width:none}}
 .notify-day{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
 margin:16px 0 4px;padding:4px 0;border-bottom:1px solid #d8d8f0}
 .product-card{display:flex;gap:14px;align-items:center;padding:14px 0;border-bottom:1px solid #d8d8f0}
@@ -254,6 +279,16 @@ margin:16px 0 4px;padding:4px 0;border-bottom:1px solid #d8d8f0}
 .meta{flex:1;min-width:0}
 .name{font-size:15px;line-height:1.35;margin:0 0 6px}
 .sub{font-family:"IBM Plex Mono",monospace;font-size:12px;color:#555;word-break:break-all}
+.sale-tags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px}
+.sale-tag{display:inline-block;padding:1px 8px;border-radius:999px;border:1px solid currentColor;
+font-size:11px;line-height:1.55;letter-spacing:.02em}
+.sale-tag--event{color:#6a4b00;background:#fff4cc}
+.sale-tag--ticket{color:#1a3f8a;background:#e7efff}
+.sale-tag--member{color:#5a2d82;background:#f3e8ff}
+.sale-tag--spot{color:#0d6b3a;background:#e5f8ee}
+.sale-tag--preorder{color:#0a4a7a;background:#e5f4ff}
+.sale-tag--raffle{color:#8a3b12;background:#ffefe4}
+.sale-tag--ended{color:#555;background:#f0f0f0}
 .stock-in{color:var(--blue)}
 .notify-row{display:flex;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid #d8d8f0}
 .notify-row:last-child{border-bottom:0}
@@ -314,6 +349,8 @@ h1.page-title{margin:24px 0 16px}
 .skip-btn{min-height:40px;padding:6px 10px}
 }
 .model-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:4px 0 20px}
+.model-section{margin:8px 0 0}
+.model-section h2,.list-section{margin:18px 0 8px;font-family:"IBM Plex Mono",monospace;font-size:13px;letter-spacing:.08em;color:var(--ink)}
 .model-grid .product-card{display:flex;flex-direction:column;align-items:stretch;gap:0;padding:0;border:0;border-bottom:0;background:transparent}
 .model-grid .catalog-card{position:relative;background:#fff;color:var(--ink);border:1px solid #e4e4f4;border-radius:8px;overflow:hidden;min-width:0;
 transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}
@@ -325,20 +362,25 @@ background:radial-gradient(circle at 50% 40%,#fff 0%,#f4f6fb 58%,#e7edf6 100%)}
 .model-grid .catalog-card__image img{width:100%;height:100%;object-fit:contain;display:block}
 .model-grid .catalog-card__placeholder{font-family:"IBM Plex Mono",monospace;font-size:13px;color:#8a8aaa}
 .model-grid .catalog-card__badge{position:absolute;top:6px;right:6px;z-index:1;background:var(--blue);color:#fff;
-font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:.06em;padding:2px 5px;border-radius:999px}
+font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.04em;padding:2px 6px;border-radius:999px}
 .model-grid .catalog-card__badge--out{background:#6a6a88}
 .model-grid .catalog-card__badge .stock-in,.model-grid .catalog-card__badge .stock-out{color:#fff}
 .model-grid .catalog-card__body{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 8px 8px;text-align:center}
-.model-grid .catalog-card__id{font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.06em;color:#6a6a88}
+.model-grid .catalog-card__id{font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.06em;line-height:1.35;color:#6a6a88;max-width:100%;overflow-wrap:anywhere}
 .model-grid .catalog-card__name{margin:0;font-family:Inter,system-ui,sans-serif;font-size:11px;font-weight:600;line-height:1.3;letter-spacing:0;text-transform:none;color:#0a0a2a;
 display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}
-.model-grid .catalog-card__subtitle{margin:0;font-family:"IBM Plex Mono",monospace;font-size:10px;line-height:1.3;color:var(--blue)}
-.model-offer .stock-in{color:var(--blue)}
-.model-offer .stock-out{color:#888}
+.model-grid .catalog-card__subtitle{margin:0;font-family:"IBM Plex Mono",monospace;font-size:10px;line-height:1.3;color:#555}
+.model-grid .sale-tags{justify-content:center;margin:4px 0 0}
+.model-grid .sale-tag{font-size:9px;letter-spacing:0;padding:0 5px}
+.model-stock .sale-tags{margin-top:4px}
+.model-grid .catalog-card__subtitle.price-in{color:var(--blue)}
+.model-grid .catalog-card__subtitle.price-out{color:#888}
+.model-offer .stock-in,.model-offer .price-in,.model-modal__detail .price-in{color:var(--blue)}
+.model-offer .stock-out,.model-offer .price-out,.model-modal__detail .price-out{color:#888}
 .model-offer-list[hidden]{display:none}
 .model-offer{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #ececf4}
 .model-offer:last-child{border-bottom:0}
-.model-offer .thumb,.model-offer .thumb-empty{width:52px;height:52px;flex:0 0 52px;object-fit:cover;background:#f4f6fb}
+.model-offer .thumb,.model-offer .thumb-empty{width:72px;height:72px;flex:0 0 72px;object-fit:contain;background:#f4f6fb}
 .model-offer .name{font-size:13px;line-height:1.35;margin:0 0 4px}
 .model-offer .name a{color:var(--ink);text-decoration:none}
 .model-offer .sub{font-size:11px;color:#555}
@@ -346,19 +388,35 @@ body.model-open{overflow:hidden}
 .model-modal[hidden]{display:none}
 .model-modal{position:fixed;inset:0;z-index:40;display:flex;align-items:flex-end;justify-content:center}
 .model-modal__backdrop{position:absolute;inset:0;border:0;padding:0;background:rgba(10,10,42,.55);cursor:pointer}
-.model-modal__panel{position:relative;z-index:1;width:100%;max-height:min(82vh,720px);overflow:auto;background:#fff;color:var(--ink);
-border-radius:12px 12px 0 0;padding:14px 16px 20px;box-shadow:0 -12px 32px rgba(10,10,42,.2)}
-.model-modal__head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 4px}
-.model-modal__title{margin:0;font-family:"IBM Plex Mono",monospace;font-size:14px;letter-spacing:.04em}
-.model-modal__close{width:32px;height:32px;border:0;background:transparent;color:var(--ink);font-size:24px;line-height:1;cursor:pointer}
+.model-modal__panel{position:relative;z-index:1;display:flex;flex-direction:column;width:100%;max-height:min(82vh,720px);overflow:hidden;background:#fff;color:var(--ink);
+border-radius:12px 12px 0 0;padding:0;box-shadow:0 -12px 32px rgba(10,10,42,.2)}
+.model-modal__scroll{overflow:auto;min-height:0;padding:4px 16px 20px}
+.model-modal__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex:0 0 auto;margin:0;padding:14px 8px 10px 16px;background:#fff;border-bottom:1px solid #ececf4}
+.model-modal__title{margin:0;font-family:Inter,system-ui,sans-serif;font-size:18px;font-weight:700;line-height:1.35;letter-spacing:0}
+.model-modal__detail{margin:6px 0 0;font-size:13px;line-height:1.45;color:#333}
+.model-modal__close{flex:0 0 auto;width:36px;height:36px;margin:0;border:0;border-radius:8px;background:#fff;color:var(--ink);font-size:24px;line-height:1;cursor:pointer}
+.model-modal__page{flex:0 0 auto;display:block;margin:0 16px 16px;padding:12px 14px;background:var(--blue);color:#fff!important;text-align:center;text-decoration:none;font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.14em}
+.model-modal__page[hidden]{display:none}
 @media(min-width:700px){
 .model-modal{align-items:center;padding:24px}
-.model-modal__panel{width:min(520px,100%);border-radius:12px}
+.model-modal__panel{width:min(680px,100%);border-radius:12px}
 }
 @media(min-width:640px){.model-grid{grid-template-columns:repeat(5,minmax(0,1fr))}}
 @media(min-width:960px){.model-grid{grid-template-columns:repeat(6,minmax(0,1fr))}}
 @media(min-width:1200px){.model-grid{grid-template-columns:repeat(8,minmax(0,1fr))}}
 """.strip()
+
+
+SEO_KEYWORD_EXTRAS = ("beyblade x", "陀螺", "戰鬥陀螺", "hkbeybladex")
+
+
+def page_keywords(*parts):
+    seen = []
+    for part in list(parts) + list(SEO_KEYWORD_EXTRAS):
+        text = " ".join(str(part or "").split())
+        if text and text not in seen:
+            seen.append(text)
+    return ", ".join(seen)
 
 
 def page_seo_head(
@@ -371,6 +429,9 @@ def page_seo_head(
     image_url=None,
     image_width=None,
     image_height=None,
+    og_type="website",
+    json_ld=None,
+    keywords=None,
 ):
     robots = "index, follow" if indexable else "noindex, nofollow"
     page_url = canonical_url or page_canonical(path)
@@ -392,6 +453,7 @@ def page_seo_head(
     img = html.escape(img_src, quote=True)
     t = html.escape(str(title or ""), quote=True)
     d = html.escape(str(description or ""), quote=True)
+    kw = html.escape(str(keywords or SITE_META_KEYWORDS), quote=True)
     extra_og = [
         '<meta property="og:site_name" content="%s">'
         % html.escape(SITE_BRAND, quote=True),
@@ -413,25 +475,25 @@ def page_seo_head(
     elif src_l.endswith(".png"):
         extra_og.append('<meta property="og:image:type" content="image/png">')
     extra_og = "\n".join(extra_og)
-    ld = json.dumps(
-        {
+    if json_ld is None:
+        json_ld = {
             "@context": "https://schema.org",
             "@type": "WebPage",
             "name": str(title or ""),
             "description": str(description or ""),
             "url": page_url,
             "image": img_src,
-        },
-        ensure_ascii=False,
-    )
+        }
+    ld = json.dumps(json_ld, ensure_ascii=False)
     return """
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>%s</title>
 <meta name="description" content="%s">
+<meta name="keywords" content="%s">
 <meta name="robots" content="%s">
 <link rel="canonical" href="%s">
-<meta property="og:type" content="website">
+<meta property="og:type" content="%s">
 <meta property="og:title" content="%s">
 <meta property="og:description" content="%s">
 <meta property="og:url" content="%s">
@@ -452,6 +514,7 @@ def page_seo_head(
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <script type="application/ld+json">%s</script>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-19VVZP9R25"></script>
+<script async src="https://www.googletagmanager.com/gtm.js?id=GTM-MS2TVW42"></script>
 <script>
 window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
@@ -461,8 +524,10 @@ gtag('config', 'G-19VVZP9R25');
 """.strip() % (
         t,
         d,
+        kw,
         robots,
         canon,
+        html.escape(og_type or "website", quote=True),
         t,
         d,
         share,
@@ -613,18 +678,59 @@ def brand_link_html():
     )
 
 
-def robots_txt():
+def robots_txt(host=""):
+    from site_data import is_admin_host
+
+    if is_admin_host(host):
+        return "\n".join(
+            [
+                "User-agent: *",
+                "Disallow: /",
+                "",
+            ]
+        )
     return "\n".join(
         [
             "User-agent: *",
             "Allow: /",
+            "Disallow: /shopslist",
+            "Disallow: /login",
+            "Disallow: /notify-test",
             "Sitemap: %s/sitemap.xml" % SITE_ORIGIN,
             "",
         ]
     )
 
 
-def sitemap_xml(cfg=None):
+def browser_item_sitemap_paths(catalog_dir=None):
+    directory = browser_catalog_dir() if catalog_dir is None else catalog_dir
+    if not directory:
+        return []
+    catalog_path = os.path.join(directory, "catalog.json")
+    if not os.path.isfile(catalog_path):
+        return []
+    try:
+        with open(catalog_path, encoding="utf-8") as fh:
+            catalog = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    paths = ["/browser"]
+    seen = set(paths)
+    for collection in ("products", "parts"):
+        for entry in catalog.get(collection) or []:
+            if not isinstance(entry, dict):
+                continue
+            item_id = str(entry.get("id") or "").strip()
+            if not item_id or "/" in item_id or "\\" in item_id or item_id in (".", ".."):
+                continue
+            path = "/browser/item/" + urllib.parse.quote(item_id, safe="-._~:")
+            if path not in seen:
+                seen.add(path)
+                paths.append(path)
+    return paths
+
+
+def sitemap_xml(cfg=None, browser_catalog_dir_override=None):
     try:
         lastmod = datetime.fromtimestamp(
             os.path.getmtime(os.path.join(image_data_dir(), "watch_status.json")), tz=timezone.utc
@@ -636,14 +742,13 @@ def sitemap_xml(cfg=None):
         "/watch",
         OG_HOME_PATH,
         "/shops",
-        "/models",
+        "/product",
         "/catalog",
         "/parts",
         "/collection",
         SUBSCRIBE_PATH,
         PRIVACY_PATH,
         TERMS_PATH,
-        shop_products_href("all"),
     ]
     urls = []
     seen = set()
@@ -652,11 +757,13 @@ def sitemap_xml(cfg=None):
         if url not in seen:
             seen.add(url)
             urls.append(url)
-    for shop in shop_chip_shops(cfg):
-        shop_id = shop.get("id")
-        if not shop_id:
-            continue
-        url = page_canonical(shop_products_href(shop_id))
+    for path in browser_item_sitemap_paths(browser_catalog_dir_override):
+        url = page_canonical(path)
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    for code in model_index_codes(cfg=cfg):
+        url = page_canonical(model_public_path(code))
         if url not in seen:
             seen.add(url)
             urls.append(url)
@@ -898,7 +1005,13 @@ def render_status_html(payload, key_query="", notifies=None, shops=None, show_up
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, OG_HOME_PATH, indexable=True),
+        page_seo_head(
+            title,
+            desc,
+            OG_HOME_PATH,
+            indexable=True,
+            keywords=SITE_META_KEYWORDS,
+        ),
         page_theme_css(),
         site_nav_html(),
         subscribe_widget_html(
@@ -924,7 +1037,13 @@ def render_share_card_html():
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, OG_HOME_PATH, indexable=True),
+        page_seo_head(
+            title,
+            desc,
+            OG_HOME_PATH,
+            indexable=True,
+            keywords=SITE_META_KEYWORDS,
+        ),
         html.escape(cdn_image_url(OG_IMAGE_PATH), quote=True),
         OG_IMAGE_WIDTH,
         OG_IMAGE_HEIGHT,
@@ -958,6 +1077,7 @@ def render_og_test_html(path=None):
             path,
             indexable=True,
             image_url=image,
+            keywords=page_keywords("OG probe", "goal card", "HK BeybladeX Watch"),
         ),
         html.escape(title),
         html.escape(image, quote=True),
@@ -971,7 +1091,7 @@ def render_shops_html(cfg=None, payload=None, show_updated=False):
     cfg = cfg if cfg is not None else CONFIG
     payload = payload or {}
     title = "店舖現況 · %s" % SITE_BRAND
-    desc = THREADS_SUBSCRIBE_DESC
+    desc = "香港爆旋陀螺店舖現況。一次睇晒 HobbyDigi、BuyMarketToy、MoonroadHK、Takara Tomy Mall 等網店現貨、缺貨同開訂。"
     return """<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -997,6 +1117,15 @@ def render_shops_html(cfg=None, payload=None, show_updated=False):
             desc,
             "/shopslist" if show_updated else "/shops",
             indexable=not show_updated,
+            keywords=page_keywords(
+                "店舖現況",
+                "HobbyDigi",
+                "BuyMarketToy",
+                "MoonroadHK",
+                "Takara Tomy Mall",
+                "爆旋陀螺現貨",
+                "爆旋陀螺開訂",
+            ),
         ),
         page_theme_css(),
         site_nav_html(),
@@ -1021,7 +1150,7 @@ def site_footer_html():
 def render_coffee_html():
     title = "請我飲杯咖啡 · %s" % SITE_BRAND
     desc = "呢個係完全免費嘅香港爆旋陀螺到貨通知專案。伺服器同開發都有成本，請我飲杯咖啡可以幫我繼續做落去。"
-    payme = html.escape(PAYME_URL, quote=True)
+    payme = outbound_href(PAYME_URL)
     alipay = html.escape(ALIPAYHK_PATH, quote=True)
     return """<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -1062,7 +1191,13 @@ def render_coffee_html():
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, "/coffee", indexable=False),
+        page_seo_head(
+            title,
+            desc,
+            "/coffee",
+            indexable=False,
+            keywords=page_keywords("請我飲杯咖啡", "PayMe", "AlipayHK", "香港爆旋陀螺"),
+        ),
         page_theme_css(),
         site_nav_html(),
         payme,
@@ -1135,7 +1270,13 @@ def render_privacy_html():
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, PRIVACY_PATH, indexable=True),
+        page_seo_head(
+            title,
+            desc,
+            PRIVACY_PATH,
+            indexable=True,
+            keywords=page_keywords("privacy policy", "私隱政策", "Google Analytics", "HK BeybladeX Watch"),
+        ),
         page_theme_css(),
         site_nav_html(),
         site,
@@ -1200,7 +1341,13 @@ def render_terms_html():
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, TERMS_PATH, indexable=True),
+        page_seo_head(
+            title,
+            desc,
+            TERMS_PATH,
+            indexable=True,
+            keywords=page_keywords("terms of service", "使用條款", "HK BeybladeX Watch", "非官方"),
+        ),
         page_theme_css(),
         site_nav_html(),
         site,
@@ -1249,14 +1396,20 @@ def render_subscribe_html():
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, SUBSCRIBE_PATH, indexable=True),
+        page_seo_head(
+            title,
+            desc,
+            SUBSCRIBE_PATH,
+            indexable=True,
+            keywords=page_keywords("訂閱通知", "Telegram", "Discord", "Threads", "爆旋陀螺補貨", "到貨通知"),
+        ),
         page_theme_css(),
         site_nav_html(),
         threads_subscribe_desc_html(),
         html.escape(THREADS_SUBSCRIBE_ASK.replace("\n", " ")),
-        html.escape(TELEGRAM_INVITE_URL, quote=True),
-        html.escape(DISCORD_INVITE_URL, quote=True),
-        html.escape(THREADS_PROFILE_URL, quote=True),
+        outbound_href(TELEGRAM_INVITE_URL),
+        outbound_href(DISCORD_INVITE_URL),
+        outbound_href(THREADS_PROFILE_URL),
         html.escape(THREADS_SUBSCRIBE_HINT),
         site_footer_html(),
         install_hint_block(),
@@ -1349,6 +1502,10 @@ def render_history_html(rows, shops=None, shop_id="", model="", start=None, end=
         models.append(model)
     title = "最新通知 · %s" % SITE_BRAND
     desc = "香港爆旋陀螺最新到貨通知。可按商店與型號篩選。"
+    if shop_id or model:
+        picked = "、".join(part for part in (str(shop_id or ""), str(model or "")) if part)
+        desc = "香港爆旋陀螺到貨紀錄，篩選 %s。" % picked
+    history_keywords = page_keywords("最新通知", shop_id, model, "到貨紀錄", "爆旋陀螺補貨")
     return """<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -1371,7 +1528,7 @@ def render_history_html(rows, shops=None, shop_id="", model="", start=None, end=
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, "/history", indexable=False),
+        page_seo_head(title, desc, "/history", indexable=False, keywords=history_keywords),
         page_theme_css(),
         site_nav_html(),
         history_filter_chips_html(shops, models, shop_id, model, start, end, src=src),
@@ -1399,6 +1556,77 @@ def product_thumb_html(item):
     )
 
 
+_MALL_SALE_TAGS = (
+    ("レアベイ購入チケット対象", "稀有陀螺購買券", "ticket"),
+    ("プレミアムX会員新規入会特典", "高級X新會員禮", "member"),
+    ("アプリ・イベント限定", "App/活動限定", "event"),
+)
+_STOCK_SALE_TAGS = (
+    ("抽選已完", "抽選已完", "ended"),
+    ("預約已完", "預約已完", "ended"),
+    ("抽選", "抽選", "raffle"),
+    ("預約", "預約", "preorder"),
+    ("現貨", "現貨", "spot"),
+)
+
+
+def mall_sale_tags(item):
+    title = str((item or {}).get("title") or "")
+    return [(label, kind) for token, label, kind in _MALL_SALE_TAGS if token in title]
+
+
+def mall_stock_tags(item):
+    item = item or {}
+    label = str(item.get("status_label") or "")
+    title = str(item.get("title") or "")
+    remark = str(item.get("remark") or "")
+    found = []
+    seen = set()
+    for token, text, kind in _STOCK_SALE_TAGS:
+        if token in seen:
+            continue
+        if token in label or token == remark or ("【%s】" % token) in title:
+            found.append((text, kind))
+            seen.add(token)
+            label = label.replace(token, "")
+            title = title.replace("【%s】" % token, "")
+    return found
+
+
+def status_without_sale_tags(label):
+    text = str(label or "")
+    for _token, note, _kind in _MALL_SALE_TAGS:
+        text = text.replace(note, "")
+    text = text.replace("應用活動限定", "")
+    for token, _text, _kind in _STOCK_SALE_TAGS:
+        text = text.replace(token, "")
+    text = re.sub(r"[・、,，]+", "・", text)
+    text = re.sub(r"（\s*・", "（", text)
+    text = re.sub(r"・\s*）", "）", text)
+    text = text.replace("（）", "").replace("()", "")
+    return text.strip(" ・")
+
+
+def sale_tags_html(item):
+    return sale_tags_html_for_items([item])
+
+
+def sale_tags_html_for_items(items):
+    chips = []
+    seen = set()
+    for item in items or []:
+        for label, kind in mall_stock_tags(item) + mall_sale_tags(item):
+            if label in seen:
+                continue
+            seen.add(label)
+            chips.append(
+                "<span class='sale-tag sale-tag--%s'>%s</span>" % (kind, html.escape(label))
+            )
+    if not chips:
+        return ""
+    return "<div class='sale-tags'>%s</div>" % "".join(chips)
+
+
 def product_card_html(item, shop_id="", extra=""):
     item = item or {}
     sku = str(item.get("sku") or "")
@@ -1406,19 +1634,23 @@ def product_card_html(item, shop_id="", extra=""):
     url = item.get("url") or ""
     if url:
         name = "<a href='%s' target='_blank' rel='noopener'>%s</a>" % (
-            html.escape(url, quote=True),
+            outbound_href(url),
             title,
         )
     else:
         name = title
     price = item.get("price") or ""
-    price_html = ("HK$%s" % html.escape(str(price))) if price else ""
-    status = html.escape(str(item.get("status_label") or ""))
+    price_html = html.escape(shown_price_text(item, shop_id)) if price else ""
+    status = html.escape(status_without_sale_tags(item.get("status_label") or ""))
     if product_stock_key(item) == "in_stock" or status == "有貨":
         status = "<span class='stock-in'>%s</span>" % status
-    line = product_line_fields(item)
-    tag = str(item.get("tag") or line["tag"] or "other")
-    model = str(item.get("model") or line["model"] or "")
+    if skips_line_model(item) or skips_line_model({"shop_id": shop_id}):
+        tag = ""
+        model = ""
+    else:
+        line = product_line_fields(item)
+        tag = str(item.get("tag") or line["tag"] or "other")
+        model = str(item.get("model") or line["model"] or "")
     shop_label = str(item.get("shop_label") or "")
     brand = shop_label or str(shop_id or "")
     bits = [
@@ -1436,34 +1668,87 @@ def product_card_html(item, shop_id="", extra=""):
     return (
         "<article class='sku-row product-card' data-shop='%s' data-sku='%s' data-tag='%s' data-model='%s'"
         " data-name='%s' data-price='%s' data-brand='%s'>"
-        "%s<div class='meta'><div class='name'>%s</div><div class='sub'>%s</div></div>%s</article>"
+        "%s<div class='meta'><div class='name'>%s</div>%s<div class='sub'>%s</div></div>%s</article>"
         % (
             html.escape(str(shop_id or ""), quote=True),
             html.escape(sku, quote=True),
             html.escape(tag, quote=True),
             html.escape(model, quote=True),
             html.escape(str(item.get("title") or sku or ""), quote=True),
-            html.escape(str(price or ""), quote=True),
+            html.escape(
+                ""
+                if not price
+                else str(
+                    listing_hkd_value(item, shop_id)
+                    if listing_hkd_value(item, shop_id) is not None
+                    else ""
+                ),
+                quote=True,
+            ),
             html.escape(brand, quote=True),
             product_thumb_html(item),
             name,
+            sale_tags_html(item),
             " · ".join(bits),
             extra,
         )
     )
 
 
-def models_href(tag=None, stock=None):
+def models_href(tag=None, stock=None, sort=None, shop=None, layout="grid"):
     query = []
     if stock == "in_stock":
         query.append(("stock", "in"))
     elif stock == "out_of_stock":
         query.append(("stock", "out"))
-    if tag in ("CX", "BX", "UX", "kuji", "other"):
+    if tag in ("CX", "BX", "UX", "BXG", "kuji", "other"):
         query.append(("tag", tag))
+    if sort == "new":
+        query.append(("sort", "new"))
+    if shop and shop != "all":
+        query.append(("shop", shop))
+    base = "/shop/all" if layout == "list" else "/product"
     if query:
-        return "/models?" + urllib.parse.urlencode(query)
-    return "/models"
+        return base + "?" + urllib.parse.urlencode(query)
+    return base
+
+
+def _listing_stamp(value):
+    text = str(value or "").replace("T", " ")[:19].strip()
+    if re.match(r"\d{4}-\d{2}-\d{2}$", text):
+        return text + " 00:00:00"
+    if re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", text):
+        return text
+    return ""
+
+
+def group_publish_info(group):
+    group = group or {}
+    face = catalog_face_for_model(group.get("model")) or {}
+    release = _listing_stamp(face.get("release"))
+    if release:
+        return release, "發售日"
+    times = [_listing_stamp(item.get("stock_changed_at")) for item in group.get("items") or []]
+    times = [stamp for stamp in times if stamp]
+    if times:
+        return max(times), ""
+    return "", ""
+
+
+def group_publish_stamp(group):
+    return group_publish_info(group)[0]
+
+
+def _sort_groups_newest(groups):
+    dated = []
+    undated = []
+    for group in groups or []:
+        if group_publish_stamp(group):
+            dated.append(group)
+        else:
+            undated.append(group)
+    dated.sort(key=group_publish_stamp, reverse=True)
+    return dated + undated
 
 
 _CATALOG_PRODUCT_CACHE = {"stamp": None, "by_id": {}}
@@ -1588,7 +1873,8 @@ def _load_browser_faces(directory):
         if current and current[0] <= rank:
             continue
         name = _browser_face_name(i18n.get(rec.get("id")) or i18n.get(key), model)
-        best[model] = (rank, {"name": name, "image": image})
+        release = str(rec.get("releaseDate") or "")[:10]
+        best[model] = (rank, {"name": name, "image": image, "release": release})
     return {model: face for model, (_, face) in best.items()}
 
 
@@ -1619,6 +1905,7 @@ def catalog_face_for_model(model):
         return {
             "name": browser.get("name") or model,
             "image": browser["image"],
+            "release": browser.get("release") or "",
             "kind": "browser",
         }
     accessory = _ACCESSORY_FACES.get(model)
@@ -1699,13 +1986,30 @@ def format_listing_price(value):
 def listing_price_values(items):
     values = []
     for item in items or []:
-        value = listing_price_value(item)
+        value = listing_hkd_value(item)
         if value is not None:
             values.append(value)
     return values
 
 
+def _foreign_price_span(priced, formatter):
+    values = [listing_price_value(item) for item in priced]
+    low, high = min(values), max(values)
+    if len(priced) > 1 and high - low >= 0.001:
+        return "%s – %s" % (formatter(low), formatter(high))
+    return formatter(low)
+
+
 def listing_price_label(items):
+    priced = [item for item in items or [] if listing_price_value(item) is not None]
+    if priced and all(item_currency_code(item) == "USD" for item in priced):
+        return _foreign_price_span(priced, format_usd_with_hkd)
+    if priced and all(
+        item_currency_code(item) == "JPY" and amazon_jp_retail_price(item) for item in priced
+    ):
+        return _foreign_price_span(priced, format_jpy_retail_with_hkd)
+    if priced and all(item_currency_code(item) == "JPY" for item in priced):
+        return _foreign_price_span(priced, format_yen_with_hkd)
     values = listing_price_values(items)
     if not values:
         return ""
@@ -1730,15 +2034,1044 @@ def group_stock_key(items):
     return "unknown"
 
 
+def group_shown_stock_label(items, stock):
+    chosen = [item for item in items or [] if product_stock_key(item) == stock]
+    labels = [
+        status_without_sale_tags((item or {}).get("status_label") or "").strip() for item in chosen
+    ]
+    plain = status_text(stock)
+    if chosen and labels and all(label and label == labels[0] for label in labels) and labels[0] != plain:
+        return labels[0]
+    return plain
+
+
 def offer_status_html(item):
     stock = product_stock_key(item)
-    label = str((item or {}).get("status_label") or status_text(stock) or "")
+    label = status_without_sale_tags((item or {}).get("status_label") or status_text(stock) or "")
     if not label:
         return ""
     css = {"in_stock": "stock-in", "out_of_stock": "stock-out"}.get(stock, "")
     if css:
         return "<span class='%s'>%s</span>" % (css, html.escape(label))
     return html.escape(label)
+
+
+def listing_display_rank(item):
+    price = listing_hkd_value(item)
+    return (
+        0 if product_stock_key(item) == "in_stock" else 1,
+        price if price is not None else 10 ** 12,
+    )
+
+
+def _offer_price_html(item):
+    price = shown_price_text(item)
+    if not price:
+        price = format_listing_price(listing_price_value(item))
+    if not price:
+        return ""
+    css = {"in_stock": "price-in", "out_of_stock": "price-out"}.get(product_stock_key(item), "")
+    text = html.escape(price)
+    if not css:
+        return text
+    return "<span class='%s'>%s</span>" % (css, text)
+
+
+# Colon separates umbrella lines (CX-00) from the combo, e.g. CX-00:S4-70V.
+# CJK stays so folded shop titles such as CX-00:限定S6-60V stay addressable.
+_PUBLIC_MODEL_RE = re.compile(
+    r"^[A-Z0-9][A-Z0-9+._:\-\u4e00-\u9fff]{0,80}$"
+)
+
+
+def public_model_code(raw):
+    text = urllib.parse.unquote(str(raw or "")).strip()
+    if not text or "/" in text or "\\" in text or ".." in text:
+        return ""
+    code = _canonical_model_code(text)
+    if not code or not _PUBLIC_MODEL_RE.match(code):
+        return ""
+    return code
+
+
+def model_public_path(code):
+    return "/product/" + urllib.parse.quote(str(code or ""), safe="-._")
+
+
+def model_index_codes(items=None, cfg=None):
+    codes = []
+    seen = set()
+
+    def add(raw):
+        code = public_model_code(raw)
+        if not code or code in seen:
+            return
+        seen.add(code)
+        codes.append(code)
+
+    for key in _catalog_products_by_id():
+        add(key)
+    if items is None:
+        items = load_shop_products_for_shop_id("all", cfg)
+    for group in group_listings_by_model(items):
+        add(group.get("model"))
+    codes.sort()
+    return codes
+
+
+def _clean_model_name(code, name):
+    name = str(name or "").strip()
+    if not name:
+        return ""
+    name = re.sub(
+        r"[（(]\s*%s\s*[）)]" % re.escape(code),
+        "",
+        name,
+        flags=re.I,
+    ).strip()
+    if name.upper().startswith(code):
+        name = name[len(code):].strip(" -·")
+    return name.strip()
+
+
+def _model_english_name(product):
+    en = str((product or {}).get("name_en") or "").strip()
+    if not en:
+        return ""
+    if re.search(r"[a-z]", en) or " " in en:
+        return en
+    return ""
+
+
+def _schema_price(value):
+    if abs(value - round(value)) < 0.001:
+        return "%d" % int(round(value))
+    return "%.2f" % value
+
+
+def _schema_availability(stock):
+    if stock == "in_stock":
+        return "https://schema.org/InStock"
+    if stock == "out_of_stock":
+        return "https://schema.org/OutOfStock"
+    return "https://schema.org/LimitedAvailability"
+
+
+def _group_for_model(items, code):
+    for group in group_listings_by_model(items):
+        if str(group.get("model") or "").upper() == code:
+            return group
+    return None
+
+
+def model_heading(code, product, face):
+    zh = _clean_model_name(
+        code,
+        (product or {}).get("name_zh") or (face or {}).get("name") or "",
+    )
+    en = _model_english_name(product)
+    bits = [code]
+    if zh:
+        bits.append(zh)
+    if en and en.lower() not in " ".join(bits).lower():
+        bits.append(en)
+    return " ".join(bits)
+
+
+_KIND_LABELS = {
+    "set": "套組",
+    "blade": "鋼鐵戰刃",
+    "ratchet": "固鎖輪盤",
+    "bit": "軸心",
+    "lock_chip": "鎖定紋章",
+    "main_blade": "主要戰刃",
+    "over_blade": "超越戰刃",
+    "metal_blade": "金屬戰刃",
+    "assist_blade": "輔助戰刃",
+    "package": "彩盒",
+    "stadium": "戰鬥盤",
+    "grip": "握把",
+}
+_MAKER_LABELS = {"tt": "亞版", "hasbro": "美版"}
+_MODEL_ALIAS_RE = re.compile(r"^(BXG|BXH|BXC|BXA|CX|UX|BX)-?(\d+)(.*)$", re.I)
+_BROWSER_DETAIL_CACHE = {"stamp": None, "dir": None, "records": None}
+_STOCK_HISTORY_CACHE = {"stamp": None, "path": None, "by_code": None}
+
+
+def _own_catalog_codes(raw):
+    text = str(raw or "").strip().upper().replace(" ", "")
+    if not text:
+        return set()
+    base = text.split("::", 1)[0]
+    match = _MODEL_ALIAS_RE.match(base)
+    if not match:
+        return {text}
+    canonical = "%s-%s%s" % (match.group(1).upper(), match.group(2), match.group(3).upper())
+    return {canonical, canonical.replace("-", "", 1), text}
+
+
+def model_code_aliases(value):
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return []
+    base = raw.split("::", 1)[0].replace(" ", "")
+    match = _MODEL_ALIAS_RE.match(base)
+    if match:
+        canonical = "%s-%s%s" % (match.group(1).upper(), match.group(2), match.group(3).upper())
+    else:
+        canonical = base or raw
+    aliases = [canonical, canonical.replace("-", "", 1), raw]
+    parent = re.match(r"^([A-Z]{2,4})-(\d+)-\d{2}$", canonical)
+    if parent:
+        aliases = ["%s-%s" % parent.groups(), "%s%s" % parent.groups()] + aliases
+    return list(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def _localized_text(value):
+    if isinstance(value, dict):
+        return str(value.get("zh-HK") or value.get("zh") or value.get("en") or "").strip()
+    return str(value or "").strip()
+
+
+def _gallery_urls(record):
+    raw = record.get("images") if isinstance(record.get("images"), list) else []
+    if not raw:
+        image = str(record.get("image") or "").strip()
+        raw = [image] if image else []
+    urls = []
+    for url in raw:
+        url = str(url or "").strip()
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _release_parts(value):
+    text = str(value or "").strip()
+    match = re.match(r"(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})", text)
+    if not match:
+        return "", text
+    iso = "%s-%02d-%02d" % (match.group(1), int(match.group(2)), int(match.group(3)))
+    return iso, iso
+
+
+def _catalog_shops(record):
+    shops = []
+    for shop in record.get("shops") or []:
+        if not isinstance(shop, dict):
+            continue
+        url = str(shop.get("url") or "").strip()
+        label = str(shop.get("label") or "").strip()
+        if label and url.startswith("http"):
+            shops.append({"label": label, "url": url})
+    return shops
+
+
+def _normalize_browser_record(record, labels):
+    item_id = str(record.get("id") or "").strip()
+    if not item_id:
+        return None
+    name = _localized_text(labels.get(item_id) if isinstance(labels, dict) else None)
+    kind = str(record.get("kind") or "").strip()
+    images = _gallery_urls(record)
+    part_ids = []
+    for part_id in record.get("partIds") or []:
+        part_id = str(part_id or "").strip()
+        if part_id and part_id not in part_ids:
+            part_ids.append(part_id)
+    release_iso, release_label = _release_parts(record.get("releaseDate"))
+    return {
+        "id": item_id,
+        "codes": _own_catalog_codes(item_id),
+        "name": name or item_id,
+        "description": _localized_text(record.get("description")),
+        "kind": kind,
+        "kind_label": _KIND_LABELS.get(kind, kind),
+        "line": str(record.get("line") or "").strip(),
+        "maker_label": _MAKER_LABELS.get(str(record.get("manufacturer") or "").strip(), ""),
+        "price": str(record.get("price") or "").strip(),
+        "release_iso": release_iso,
+        "release_label": release_label,
+        "shops": _catalog_shops(record),
+        "part_ids": part_ids,
+        "images": images,
+    }
+
+
+def _browser_detail_records():
+    directory = browser_catalog_dir()
+    path = os.path.join(directory, "catalog.json") if directory else ""
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+        directory = ""
+    cached = _BROWSER_DETAIL_CACHE
+    if cached["dir"] == directory and cached["stamp"] == stamp and cached["records"] is not None:
+        return cached["records"]
+    records = []
+    if directory:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                catalog = json.load(fh)
+        except (OSError, ValueError):
+            catalog = {}
+        try:
+            with open(os.path.join(directory, "i18n.json"), encoding="utf-8") as fh:
+                labels = json.load(fh)
+        except (OSError, ValueError):
+            labels = {}
+        if not isinstance(labels, dict):
+            labels = {}
+        if isinstance(catalog, dict):
+            for collection in ("products", "parts"):
+                for record in catalog.get(collection) or []:
+                    if not isinstance(record, dict):
+                        continue
+                    normalized = _normalize_browser_record(record, labels)
+                    if normalized:
+                        records.append(normalized)
+    cached["dir"] = directory
+    cached["stamp"] = stamp
+    cached["records"] = records
+    return records
+
+
+def _text_record_rank(code, record):
+    exact = 0 if record["id"].upper() == str(code or "").upper() else 1
+    kind = {"set": 0, "package": 1, "stadium": 2, "grip": 2}.get(record.get("kind"), 3)
+    return (exact, kind, record["id"])
+
+
+def browser_model_detail(code):
+    wanted = _own_catalog_codes(code)
+    if not wanted:
+        return None
+    records = _browser_detail_records()
+    matches = [record for record in records if wanted & record["codes"]]
+    if not matches:
+        return None
+    text = sorted(matches, key=lambda record: _text_record_rank(code, record))[0]
+    gallery = sorted(
+        matches,
+        key=lambda record: (-len(record["images"]),) + _text_record_rank(code, record),
+    )[0]
+    by_id = {record["id"]: record for record in records}
+    parts = []
+    for part_id in text["part_ids"]:
+        if part_id.upper() == str(code or "").upper():
+            continue
+        part = by_id.get(part_id)
+        parts.append(
+            {
+                "id": part_id,
+                "name": part["name"] if part else part_id,
+                "kind_label": part["kind_label"] if part else "",
+                "image": (part["images"][0] if part and part["images"] else ""),
+                "href": "/browser/item/" + urllib.parse.quote(part_id, safe="-._~:"),
+            }
+        )
+    images = gallery["images"] or text["images"]
+    return {
+        "name": text["name"],
+        "description": text["description"] or gallery["description"],
+        "kind_label": text["kind_label"],
+        "line": text["line"] or gallery["line"],
+        "maker_label": text["maker_label"] or gallery["maker_label"],
+        "price": text["price"] or gallery["price"],
+        "release_iso": text["release_iso"] or gallery["release_iso"],
+        "release_label": text["release_label"] or gallery["release_label"],
+        "shops": text["shops"] or gallery["shops"],
+        "images": images,
+        "parts": parts,
+    }
+
+
+def _load_stock_history(path):
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        _STOCK_HISTORY_CACHE["stamp"] = None
+        _STOCK_HISTORY_CACHE["path"] = path
+        _STOCK_HISTORY_CACHE["by_code"] = {}
+        return {}
+    cached = _STOCK_HISTORY_CACHE
+    if cached["path"] == path and cached["stamp"] == stamp and cached["by_code"] is not None:
+        return cached["by_code"]
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError):
+        payload = {}
+    by_code = payload.get("byCode") if isinstance(payload, dict) else {}
+    if not isinstance(by_code, dict):
+        by_code = {}
+    cached["path"] = path
+    cached["stamp"] = stamp
+    cached["by_code"] = by_code
+    return by_code
+
+
+def model_stock_history(code, limit=15):
+    directory = browser_catalog_dir()
+    if not directory:
+        return []
+    by_code = _load_stock_history(os.path.join(directory, "stock-history.json"))
+    if not by_code:
+        return []
+    keys = []
+    for alias in [str(code or "")] + model_code_aliases(code):
+        if alias and alias not in keys:
+            keys.append(alias)
+    seen = set()
+    events = []
+    for key in keys:
+        for row in by_code.get(key) or []:
+            if not isinstance(row, dict):
+                continue
+            ident = (
+                str(row.get("at") or ""),
+                str(row.get("shop") or ""),
+                str(row.get("title") or ""),
+            )
+            if ident in seen:
+                continue
+            seen.add(ident)
+            events.append(row)
+    events.sort(key=lambda row: str(row.get("at") or ""), reverse=True)
+    return events[:limit]
+
+
+def _public_asset_url(url):
+    url = str(url or "").strip()
+    if not url:
+        return ""
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("/"):
+        origin = (os.environ.get("BEYBLADE_CDN_ORIGIN") or CDN_ORIGIN).rstrip("/")
+        if origin in ("", "local", "-"):
+            origin = SITE_ORIGIN
+        return origin.rstrip("/") + url
+    return url
+
+
+def _schema_images(image):
+    if isinstance(image, (list, tuple)):
+        values = image
+    elif image:
+        values = [image]
+    else:
+        values = []
+    urls = []
+    for value in values:
+        url = _public_asset_url(value)
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _plain_description(text):
+    return " ".join(str(text or "").replace("\\n", " ").split())
+
+
+def _description_html(text):
+    text = str(text or "").replace("\\n", "\n")
+    return "<br>".join(html.escape(line) for line in text.split("\n"))
+
+
+def model_product_json_ld(code, title, description, page_url, image, product, items, name=""):
+    items = list(items or [])
+    node = {
+        "@type": "Product",
+        "name": name or model_heading(code, product, {}),
+        "sku": code,
+        "mpn": code,
+        "brand": {"@type": "Brand", "name": "Beyblade X"},
+        "description": description,
+        "url": page_url,
+    }
+    images = _schema_images(image)
+    if images:
+        node["image"] = images
+    jan = re.sub(r"\D", "", str((product or {}).get("jan") or ""))
+    if len(jan) == 13:
+        node["gtin13"] = jan
+    offers = []
+    for item in items:
+        price = listing_hkd_value(item)
+        if price is None:
+            continue
+        shop = str(item.get("shop_label") or item.get("shop_id") or "").strip()
+        offer = {
+            "@type": "Offer",
+            "priceCurrency": "HKD",
+            "price": _schema_price(price),
+            "availability": _schema_availability(product_stock_key(item)),
+            "url": str(item.get("url") or "").strip() or page_url,
+        }
+        if shop:
+            offer["seller"] = {"@type": "Organization", "name": shop}
+        offers.append(offer)
+    if offers:
+        prices = [listing_hkd_value(item) for item in items]
+        prices = [price for price in prices if price is not None]
+        stock = group_stock_key(items)
+        node["offers"] = {
+            "@type": "AggregateOffer",
+            "priceCurrency": "HKD",
+            "lowPrice": _schema_price(min(prices)),
+            "highPrice": _schema_price(max(prices)),
+            "offerCount": len(offers),
+            "availability": _schema_availability(stock),
+            "offers": offers,
+        }
+    return {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "WebPage",
+                "name": title,
+                "description": description,
+                "url": page_url,
+            },
+            {
+                "@type": "BreadcrumbList",
+                "itemListElement": [
+                    {
+                        "@type": "ListItem",
+                        "position": 1,
+                        "name": "首頁",
+                        "item": page_canonical("/"),
+                    },
+                    {
+                        "@type": "ListItem",
+                        "position": 2,
+                        "name": "全部現貨",
+                        "item": page_canonical("/product"),
+                    },
+                    {
+                        "@type": "ListItem",
+                        "position": 3,
+                        "name": code,
+                        "item": page_url,
+                    },
+                ],
+            },
+            node,
+        ],
+    }
+
+
+def models_index_json_ld(groups, title, description):
+    elements = []
+    for group in groups or []:
+        code = public_model_code(group.get("model"))
+        if not code:
+            continue
+        elements.append(
+            {
+                "@type": "ListItem",
+                "position": len(elements) + 1,
+                "name": code,
+                "url": page_canonical(model_public_path(code)),
+            }
+        )
+    if not elements:
+        return None
+    page_url = page_canonical("/product")
+    return {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "WebPage",
+                "name": title,
+                "description": description,
+                "url": page_url,
+            },
+            {
+                "@type": "ItemList",
+                "numberOfItems": len(elements),
+                "itemListElement": elements,
+            },
+        ],
+    }
+
+
+def _model_gallery_html(images, alt):
+    images = [str(url or "").strip() for url in images or [] if str(url or "").strip()]
+    if not images:
+        return ""
+    count = ""
+    thumbs = ""
+    if len(images) > 1:
+        buttons = []
+        for index, url in enumerate(images):
+            buttons.append(
+                "<button type='button' class='model-hero__thumb%s' data-model-photo='%s' data-model-index='%d'>"
+                "<img src='%s' alt='%s'></button>"
+                % (
+                    " is-active" if index == 0 else "",
+                    html.escape(url, quote=True),
+                    index + 1,
+                    html.escape(url, quote=True),
+                    html.escape("%s 圖 %d" % (alt, index + 1), quote=True),
+                )
+            )
+        thumbs = "<div class='model-hero__thumbs'>%s</div>" % "".join(buttons)
+        count = "<span class='model-hero__count' id='model-hero-count'>1 / %d</span>" % len(images)
+    main = (
+        "<div class='model-hero__stage'><img id='model-hero-photo' src='%s' alt='%s'>%s</div>"
+        % (html.escape(images[0], quote=True), html.escape(alt, quote=True), count)
+    )
+    return "<div class='model-hero__media'>%s%s</div>" % (main, thumbs)
+
+
+def _model_parts_html(parts):
+    cards = []
+    for part in parts or []:
+        name = str(part.get("name") or part.get("id") or "")
+        image = str(part.get("image") or "").strip()
+        image_html = (
+            "<img src='%s' alt='%s'>"
+            % (html.escape(image, quote=True), html.escape(name, quote=True))
+            if image
+            else ""
+        )
+        kind = str(part.get("kind_label") or "").strip()
+        kind_html = "<span class='model-part__kind'>%s</span>" % html.escape(kind) if kind else ""
+        cards.append(
+            "<li><a href='%s'>%s%s<code>%s</code><span>%s</span></a></li>"
+            % (
+                html.escape(str(part.get("href") or ""), quote=True),
+                image_html,
+                kind_html,
+                html.escape(str(part.get("id") or "")),
+                html.escape(name),
+            )
+        )
+    if not cards:
+        return ""
+    return (
+        "<section class='model-block'><h2>包含部件</h2><ul class='model-parts'>%s</ul></section>"
+        % "".join(cards)
+    )
+
+
+def _model_official_shops_html(shops):
+    links = []
+    for shop in shops or []:
+        url = str(shop.get("url") or "").strip()
+        label = str(shop.get("label") or "").strip()
+        if not label or not url.startswith("http"):
+            continue
+        links.append(
+            "<li><a href='%s' target='_blank' rel='noopener'>%s</a></li>"
+            % (outbound_href(url), html.escape(label))
+        )
+    if not links:
+        return ""
+    return (
+        "<div class='model-shops'><span class='model-kicker'>官方商店</span><ul>%s</ul></div>"
+        % "".join(links)
+    )
+
+
+def _model_offer_card(shop, title, price_html, status_html, when, image_html="", tags_html=""):
+    aside = "".join(
+        part
+        for part in (
+            "<span class='model-stock__price'>%s</span>" % price_html if price_html else "",
+            status_html,
+            "<span class='model-stock__when'>%s</span>" % html.escape(when) if when else "",
+        )
+    )
+    return (
+        "%s<span class='model-stock__main'><span class='model-stock__shop'>%s</span>"
+        "<span class='model-stock__title'>%s</span>%s</span><span class='model-stock__aside'>%s</span>"
+        % (image_html, html.escape(shop), html.escape(title), tags_html, aside)
+    )
+
+
+def _model_stock_row_html(item):
+    item = item or {}
+    title = str(item.get("title") or item.get("sku") or "")
+    shop = str(item.get("shop_label") or item.get("shop_id") or "").strip()
+    url = str(item.get("url") or "").strip()
+    changed = _listing_stamp(item.get("stock_changed_at"))
+    image_html = product_thumb_html(item)
+    body = _model_offer_card(
+        shop,
+        title,
+        _offer_price_html(item),
+        offer_status_html(item),
+        changed[:16] if changed else "",
+        image_html,
+        sale_tags_html(item),
+    )
+    css = "model-stock model-stock--photo" if image_html else "model-stock"
+    if url:
+        return (
+            "<li><a class='%s' href='%s' target='_blank' rel='noopener'>%s</a></li>"
+            % (css, outbound_href(url), body)
+        )
+    return "<li><div class='%s'>%s</div></li>" % (css, body)
+
+
+def _history_price_text(row):
+    if isinstance(row, dict):
+        text = shown_price_text(row)
+        if text:
+            return text
+        raw = str(row.get("price") or "").strip()
+    else:
+        raw = str(row or "").strip()
+    if raw and raw[0].isdigit():
+        return "HK$" + raw
+    return raw
+
+
+def _model_history_html(events):
+    rows = []
+    for row in events or []:
+        shop = str(row.get("shop") or "")
+        title = str(row.get("title") or "")
+        at = str(row.get("at") or "")[:16]
+        price = _history_price_text(row)
+        body = _model_offer_card(shop, title, html.escape(price) if price else "", "", at)
+        url = str(row.get("url") or "").strip()
+        if url.startswith("http"):
+            rows.append(
+                "<li><a class='model-stock' href='%s' target='_blank' rel='noopener'>%s</a></li>"
+                % (outbound_href(url), body)
+            )
+        else:
+            rows.append("<li><div class='model-stock'>%s</div></li>" % body)
+    if not rows:
+        return ""
+    return "<h3>入貨紀錄</h3><ul class='model-stock-list'>%s</ul>" % "".join(rows)
+
+
+def _model_chips_html(bits):
+    chips = []
+    for index, bit in enumerate(bits):
+        text = str(bit or "").strip()
+        if not text:
+            continue
+        css = " class='is-code'" if index == 0 else ""
+        chips.append("<span%s>%s</span>" % (css, html.escape(text)))
+    if not chips:
+        return ""
+    return "<p class='model-chips'>%s</p>" % "".join(chips)
+
+
+def _model_verdict_html(listed, price_label):
+    count = len(listed or [])
+    in_count = sum(1 for item in listed or [] if product_stock_key(item) == "in_stock")
+    if not count:
+        state, css, note = "未有紀錄", "", "香港舖頭"
+    elif in_count:
+        state, css, note = "%d 間有貨" % in_count, " is-in", "共 %d 間舖" % count
+    else:
+        state, css, note = "全部缺貨", " is-out", "%d 間舖頭" % count
+    price = html.escape(price_label) if price_label else "未標價"
+    return (
+        "<div class='model-verdict%s'>"
+        "<div class='model-verdict__price'><span>香港現價</span><strong>%s</strong></div>"
+        "<div class='model-verdict__state'><b>%s</b><span>%s</span></div></div>"
+        % (css, price, html.escape(state), html.escape(note))
+    )
+
+
+def _model_gallery_script():
+    return """<script>
+(function(){
+  var photo=document.getElementById("model-hero-photo");
+  if(!photo) return;
+  var buttons=document.querySelectorAll("[data-model-photo]");
+  for(var i=0;i<buttons.length;i++){
+    buttons[i].addEventListener("click", function(){
+      photo.src=this.getAttribute("data-model-photo");
+      for(var j=0;j<buttons.length;j++) buttons[j].classList.remove("is-active");
+      this.classList.add("is-active");
+      var count=document.getElementById("model-hero-count");
+      if(count) count.textContent=this.getAttribute("data-model-index")+" / "+buttons.length;
+    });
+  }
+})();
+</script>"""
+
+
+def render_model_detail_html(code, items=None):
+    code = public_model_code(code)
+    if not code:
+        return None
+    if items is None:
+        items = load_shop_products_for_shop_id("all")
+    group = _group_for_model(items, code)
+    listed = list((group or {}).get("items") or [])
+    product = _catalog_products_by_id().get(code)
+    if not product and not listed:
+        return None
+    product = product or {}
+    face = catalog_face_for_model(code) or {}
+    detail = browser_model_detail(code) or {}
+    heading = model_heading(code, product, face)
+    visible_name = str(detail.get("name") or "").strip()
+    if not visible_name or visible_name.upper() == code:
+        visible_name = heading
+    catalog_name = str(detail.get("name") or "").strip()
+    title_heading = catalog_name if catalog_name and catalog_name.upper() != code else heading
+    title = "%s 香港現貨 · %s" % (title_heading, SITE_BRAND)
+    priced = current_price_items(listed)
+    price_label = listing_price_label(priced)
+    stock = group_stock_key(listed) if listed else ""
+    stock_label = {"in_stock": "有貨", "out_of_stock": "缺貨"}.get(stock, "")
+    blurb = _plain_description(detail.get("description") or product.get("description") or "")
+    desc = product_seo_description(
+        {
+            "description": " ".join(
+                part
+                for part in (blurb, price_label, stock_label, "香港爆旋陀螺現貨")
+                if part
+            )
+        }
+    )
+    model_keywords = page_keywords(code, visible_name, "香港現貨", "爆旋陀螺價錢", "爆旋陀螺開訂")
+    images = list(detail.get("images") or [])
+    if not images:
+        image = str(face.get("image") or "").strip()
+        if not image and listed:
+            image = product_image_url(listed[0]) or ""
+        if image:
+            images = [image]
+    page_url = page_canonical(model_public_path(code))
+    facts = []
+    for label, value in (
+        ("JAN", product.get("jan") or ""),
+        ("類型", product.get("bey_type") or ""),
+        ("原裝配置", product.get("stock_combo") or ""),
+    ):
+        value = str(value or "").strip()
+        if value:
+            facts.append(
+                "<div class='model-stat'><span>%s</span><b>%s</b></div>"
+                % (html.escape(label), html.escape(value))
+            )
+    release_label = str(detail.get("release_label") or product.get("released_on") or face.get("release") or "").strip()
+    release_iso = str(detail.get("release_iso") or "").strip()
+    if not release_iso and re.match(r"\d{4}-\d{2}-\d{2}$", release_label):
+        release_iso = release_label
+    if release_label:
+        time_attr = " datetime='%s'" % html.escape(release_iso, quote=True) if release_iso else ""
+        facts.insert(
+            0,
+            "<div class='model-stat'><span>發售</span><b><time%s>%s</time></b></div>"
+            % (time_attr, html.escape(release_label)),
+        )
+    list_price = str(detail.get("price") or "").strip()
+    if list_price:
+        facts.insert(
+            1 if release_label else 0,
+            "<div class='model-stat'><span>日版售價</span><b>%s</b></div>" % html.escape(list_price),
+        )
+    meta_bits = [
+        bit
+        for bit in (
+            detail.get("kind_label"),
+            detail.get("line"),
+            detail.get("maker_label"),
+        )
+        if bit
+    ]
+    chips_html = _model_chips_html([code] + meta_bits)
+    verdict_html = _model_verdict_html(listed, price_label)
+    body_desc = detail.get("description") or product.get("description") or ""
+    desc_html = (
+        "<div class='model-copy'><span class='model-kicker'>產品說明</span>"
+        "<div class='model-hero__description'>%s</div></div>" % _description_html(body_desc)
+        if body_desc
+        else ""
+    )
+    stock_rows = "".join(
+        _model_stock_row_html(item) for item in sorted(listed, key=listing_display_rank)
+    )
+    if not stock_rows:
+        stock_rows = "<li class='model-empty'>暫時未有舖頭紀錄</li>"
+    history_html = _model_history_html(model_stock_history(code))
+    parts_html = _model_parts_html(detail.get("parts"))
+    crumbs = (
+        "<nav class='crumbs' aria-label='麵包屑'>"
+        "<a href='/'>首頁</a> / <a href='/product'>全部現貨</a> / %s</nav>"
+        % html.escape(code)
+    )
+    gallery_script = _model_gallery_script() if len(images) > 1 else ""
+    stats_html = "<div class='model-stats'>%s</div>" % "".join(facts) if facts else ""
+    return """<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+%s
+<style>
+%s
+.crumbs{margin:4px 0 0;font-size:12px;line-height:1.3}
+.crumbs a{color:#fff}
+.wrap:has(.model-page){padding:10px 12px 24px}
+.model-page{margin-top:10px;padding:10px 10px 12px;overflow:visible}
+.model-hero{display:grid;grid-template-columns:1fr;gap:10px;align-items:start}
+.model-hero__media,.model-hero__info,.model-stock__main{min-width:0}
+.model-hero__media{display:flex;flex-direction:column;gap:6px}
+.model-hero__stage{position:relative;display:flex;align-items:center;justify-content:center;width:fit-content;max-width:100%%;margin-inline:auto;background:#f4f5f8;border:1px solid #e6e6ee;overflow:hidden}
+.model-hero__stage img{display:block;width:auto;max-width:100%%;height:auto;max-height:220px;object-fit:contain}
+.model-hero__count{position:absolute;right:8px;bottom:8px;padding:2px 6px;background:var(--blue);color:#fff;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.06em}
+.model-hero__thumbs{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.model-hero__thumb{flex:0 0 52px;width:52px;height:52px;padding:3px;border:1px solid #e4e4ee;background:#fff;cursor:pointer}
+.model-hero__thumb.is-active{border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue)}
+.model-hero__thumb img{display:block;width:100%%;height:100%%;object-fit:contain}
+.model-chips{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 6px}
+.model-chips span{border:1px solid #d9d9e4;padding:2px 6px;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.06em;color:#333}
+.model-chips .is-code{background:var(--blue);color:#fff;border-color:var(--blue)}
+.model-hero h1{font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(22px,5.4vw,26px);line-height:1.15;margin:0 0 8px;max-width:none;text-transform:none;letter-spacing:0}
+.model-verdict{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 12px;padding:8px 10px;margin:0 0 8px;background:var(--blue);color:#fff}
+.model-verdict span{display:block;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;opacity:.72}
+.model-verdict strong{display:block;margin-top:1px;font-family:"Instrument Serif",Georgia,serif;font-weight:400;font-size:clamp(22px,5vw,26px);line-height:1}
+.model-verdict__state{margin-left:auto;text-align:right;white-space:nowrap}
+.model-verdict__state b{display:block;font-size:13px;font-weight:600;letter-spacing:.02em}
+.model-verdict.is-in{background:var(--blue)}
+.model-verdict.is-out{background:var(--ink)}
+.model-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:6px;margin:0 0 8px}
+.model-stat{border:1px solid #ececf2;padding:6px 8px;background:#fafafc;min-width:0}
+.model-stat span,.model-kicker{display:block;margin-bottom:2px;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#777}
+.model-stat b{font-weight:600;font-size:13px;overflow-wrap:anywhere}
+.model-shops ul,.model-parts,.model-stock-list{list-style:none;padding:0;margin:0}
+.model-shops ul{display:flex;flex-wrap:wrap;gap:6px}
+.model-shops a{display:inline-block;border:1px solid var(--ink);padding:5px 8px;color:var(--ink);text-decoration:none;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.04em}
+.model-page a.model-stock,.model-page .model-parts a,.model-page .model-shops a{text-decoration:none}
+.model-shops a:hover,.model-parts a:hover,.model-stock:hover{background:rgba(26,26,255,.06)}
+.model-copy{margin-top:8px}
+.model-hero__description{max-width:68ch;font-size:13px;line-height:1.5;color:#2c2c3a}
+.model-page h2{margin:0 0 8px;letter-spacing:.12em}
+.model-block{margin-top:12px;padding-top:2px;border-top:1px solid #ececf2}
+.model-block h3{margin:12px 0 6px;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#666}
+.model-parts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.model-parts a{display:flex;flex-direction:column;gap:4px;min-height:100%%;padding:6px;border:1px solid #ececf2;background:#fff;color:inherit;text-decoration:none}
+.model-parts img{width:100%%;aspect-ratio:1;object-fit:contain;background:#f7f7fb}
+.model-part__kind,.model-parts code{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.06em;color:#777}
+.model-parts a > span:last-child{font-size:12px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.model-stock-list{display:grid;gap:6px}
+.model-stock{display:grid;grid-template-columns:minmax(0,1fr);gap:4px 8px;align-items:center;padding:8px 8px;border:1px solid #ececf2;color:inherit;text-decoration:none;background:#fff}
+.model-stock--photo{grid-template-columns:52px minmax(0,1fr)}
+.model-stock .thumb,.model-stock .thumb-empty{width:52px;height:52px;flex:none;object-fit:contain;background:#f4f6fb}
+.model-stock__shop{display:block;font-weight:700;font-size:14px;line-height:1.25}
+.model-stock__title{display:-webkit-box;margin-top:2px;font-size:12px;line-height:1.35;color:#666;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.model-stock__aside{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:4px 6px;text-align:left}
+.model-stock--photo .thumb,.model-stock--photo .thumb-empty{grid-row:1 / span 2;align-self:center}
+.model-stock--photo .model-stock__aside{grid-column:2}
+.model-stock__price{font-size:14px;font-weight:700}
+.model-stock__when{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.04em;color:#888}
+.model-stock .stock-in,.model-stock .stock-out{padding:2px 6px;font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.06em}
+.model-stock .stock-in{color:#fff;background:var(--blue)}
+.model-stock .stock-out{color:var(--ink);background:#ececf8}
+.model-stock .price-in,.model-stock .price-out{color:inherit}
+.model-empty{padding:10px;border:1px dashed #ddd;color:#666;font-size:13px}
+body:has(.install-hint.show) .model-page{padding-bottom:108px}
+@media(min-width:700px){
+.wrap:has(.model-page){padding:16px 24px 36px}
+.model-page{margin-top:14px;padding:14px 16px 16px}
+.model-hero{gap:16px}
+.model-hero__stage{aspect-ratio:1;width:100%%;max-height:360px;margin:0}
+.model-hero__stage img{width:100%%;height:100%%;max-height:none}
+.model-hero__thumb{flex-basis:60px;width:60px;height:60px}
+.model-hero h1{font-size:clamp(28px,3vw,40px);line-height:1.08;margin:0 0 10px}
+.model-verdict{padding:10px 14px}
+.model-verdict strong{font-size:clamp(26px,2.6vw,32px)}
+.model-verdict__state b{font-size:14px}
+.model-stats{gap:8px}
+.model-stat{padding:8px 10px}
+.model-parts{grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
+.model-stock{grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:8px 12px;align-items:center}
+.model-stock--photo{grid-template-columns:56px minmax(0,1fr) auto}
+.model-stock .thumb,.model-stock .thumb-empty,.model-stock--photo .thumb,.model-stock--photo .thumb-empty{width:56px;height:56px;grid-column:1;grid-row:1}
+.model-stock__main{grid-column:1;grid-row:1;display:flex;align-items:baseline;gap:8px;min-width:0}
+.model-stock--photo .model-stock__main{grid-column:2}
+.model-stock__shop{flex:none}
+.model-stock__title{margin-top:0;flex:1;min-width:0}
+.model-stock__aside,.model-stock--photo .model-stock__aside{grid-column:2;grid-row:1;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:flex-end;gap:8px 10px;text-align:right;white-space:nowrap}
+.model-stock--photo .model-stock__aside{grid-column:3}
+.model-stock__title{-webkit-line-clamp:1}
+}
+@media(min-width:860px){
+.model-hero{grid-template-columns:minmax(220px,.78fr) minmax(0,1.22fr);gap:20px}
+.model-hero__stage{max-height:420px}
+}
+</style>
+</head>
+<body>
+<div class="slash" aria-hidden="true"></div>
+<div class="wrap">
+%s
+%s
+<section class="panel model-page">
+<article class="model-hero">
+%s
+<div class="model-hero__info">
+%s
+<h1>%s</h1>
+%s
+%s
+%s
+%s
+</div>
+</article>
+%s
+<section class="model-block">
+<h2>香港店舖庫存</h2>
+<ul class="model-stock-list">
+%s
+</ul>
+%s
+</section>
+</section>
+</div>
+%s
+%s
+</body>
+</html>
+""" % (
+        page_seo_head(
+            title,
+            desc,
+            model_public_path(code),
+            indexable=True,
+            image_url=images[0] if images else None,
+            og_type="product",
+            keywords=model_keywords,
+            json_ld=model_product_json_ld(
+                code,
+                title,
+                desc,
+                page_url,
+                images,
+                product,
+                listed,
+                name=visible_name,
+            ),
+        ),
+        page_theme_css(),
+        site_nav_html(),
+        crumbs,
+        _model_gallery_html(images, visible_name),
+        chips_html,
+        html.escape(visible_name),
+        verdict_html,
+        stats_html,
+        _model_official_shops_html(detail.get("shops")),
+        desc_html,
+        parts_html,
+        stock_rows,
+        history_html,
+        install_hint_block(),
+        gallery_script,
+    )
 
 
 def model_offer_html(item):
@@ -1748,25 +3081,33 @@ def model_offer_html(item):
     name = html.escape(title)
     if url:
         name = "<a href='%s' target='_blank' rel='noopener'>%s</a>" % (
-            html.escape(url, quote=True),
+            outbound_href(url),
             name,
         )
     shop = str(item.get("shop_label") or item.get("shop_id") or "").strip()
-    price = format_listing_price(listing_price_value(item))
-    bits = [html.escape(part) for part in (shop, price) if part]
+    price = _offer_price_html(item)
+    changed = _listing_stamp(item.get("stock_changed_at"))
+    bits = [part for part in (html.escape(shop) if shop else "", price, html.escape(changed[:16]) if changed else "") if part]
     status = offer_status_html(item)
     if status:
         bits.append(status)
     return (
-        "<article class='model-offer'>%s<div class='meta'><div class='name'>%s</div>"
+        "<article class='model-offer'>%s<div class='meta'><div class='name'>%s</div>%s"
         "<div class='sub'>%s</div></div></article>"
-        % (product_thumb_html(item), name, " · ".join(bits))
+        % (product_thumb_html(item), name, sale_tags_html(item), " · ".join(bits))
     )
+
+
+def catalog_id_label(model):
+    parts = [part for part in str(model or "").split("+") if part]
+    if len(parts) > 1:
+        return " · ".join(parts)
+    return str(model or "")
 
 
 def model_grid_card_html(group):
     group = group or {}
-    items = sorted(list(group.get("items") or []), key=listing_rank)
+    items = sorted(list(group.get("items") or []), key=listing_display_rank)
     if not items:
         return ""
     primary = items[0]
@@ -1776,21 +3117,35 @@ def model_grid_card_html(group):
     tag = group_tag_key(group)
     priced = current_price_items(items)
     price_label = listing_price_label(priced)
+    price_class = {"in_stock": "price-in", "out_of_stock": "price-out"}.get(group_stock_key(priced), "")
     sku = str(primary.get("sku") or "")
     shop_id = str(primary.get("shop_id") or "")
     brand = str(primary.get("shop_label") or shop_id)
-    code = "<code class='catalog-card__id'>%s</code>" % html.escape(model) if model else ""
-    range_html = (
-        "<p class='catalog-card__subtitle'>%s</p>" % html.escape(price_label) if price_label else ""
+    code = (
+        "<code class='catalog-card__id'>%s</code>" % html.escape(catalog_id_label(model))
+        if model
+        else ""
     )
+    range_html = (
+        "<p class='catalog-card__subtitle%s'>%s</p>"
+        % ((" " + price_class) if price_class else "", html.escape(price_label))
+        if price_label
+        else ""
+    )
+    mall_items = [
+        item
+        for item in items
+        if str(item.get("shop_id") or "") == "takaratomymall"
+    ]
+    tags_html = sale_tags_html_for_items(mall_items)
     placeholder = model or title or "?"
     image_html = notify_card_image_html(primary, title, placeholder, src=face.get("image") or "")
     body = (
-        "<div class='catalog-card__body'>%s<h2 class='catalog-card__name'>%s</h2>%s</div>"
-        % (code, html.escape(title), range_html)
+        "<div class='catalog-card__body'>%s<h2 class='catalog-card__name'>%s</h2>%s%s</div>"
+        % (code, html.escape(title), range_html, tags_html)
     )
     stock = group_stock_key(items)
-    stock_label = status_text(stock)
+    stock_label = group_shown_stock_label(items, stock)
     stock_class = {"in_stock": "stock-in", "out_of_stock": "stock-out"}.get(stock, "")
     badge_class = "catalog-card__badge catalog-card__badge--out" if stock == "out_of_stock" else "catalog-card__badge"
     media = (
@@ -1799,23 +3154,50 @@ def model_grid_card_html(group):
         % (badge_class, stock_class, html.escape(stock_label), image_html)
     )
     offers = "\n".join(model_offer_html(item) for item in items)
-    label = model or title
+    display_name = title if title and title != model else ""
+    label = " · ".join(part for part in (model, display_name) if part)
+    shops = []
+    for item in items:
+        shop = str(item.get("shop_label") or item.get("shop_id") or "").strip()
+        if shop and shop not in shops:
+            shops.append(shop)
+    published, published_label = group_publish_info(group)
+    detail_bits = []
+    if price_label:
+        detail_bits.append(price_label)
+    if shops:
+        detail_bits.append("%d 間店" % len(shops))
+    if published and published_label:
+        detail_bits.append("%s %s" % (published_label, published[:10]))
+    if model:
+        hit = (
+            "<a class='catalog-card__hit' href='%s' aria-haspopup='dialog' aria-label='%s'>%s%s</a>"
+            % (
+                html.escape(model_public_path(model), quote=True),
+                html.escape(label, quote=True),
+                media,
+                body,
+            )
+        )
+    else:
+        hit = (
+            "<button type='button' class='catalog-card__hit' aria-haspopup='dialog' aria-label='%s'>%s%s</button>"
+            % (html.escape(label, quote=True), media, body)
+        )
     return (
         "<article class='catalog-card product-card' data-shop='%s' data-sku='%s' data-tag='%s'"
-        " data-model='%s' data-name='%s' data-price='%s' data-brand='%s'>"
-        "<button type='button' class='catalog-card__hit' aria-haspopup='dialog' aria-label='%s'>%s%s</button>"
-        "<div class='model-offer-list' hidden>%s</div></article>"
+        " data-model='%s' data-name='%s' data-detail='%s' data-price='%s' data-brand='%s'>"
+        "%s<div class='model-offer-list' hidden>%s</div></article>"
         % (
             html.escape(shop_id, quote=True),
             html.escape(sku, quote=True),
             html.escape(tag, quote=True),
             html.escape(model, quote=True),
             html.escape(title, quote=True),
+            html.escape(" · ".join(detail_bits), quote=True),
             html.escape(price_label, quote=True),
             html.escape(brand, quote=True),
-            html.escape(label, quote=True),
-            media,
-            body,
+            hit,
             offers,
         )
     )
@@ -1826,27 +3208,47 @@ def model_modal_html():
         '<div class="model-modal" id="model-modal" hidden>'
         '<button type="button" class="model-modal__backdrop" data-model-close aria-label="關閉"></button>'
         '<div class="model-modal__panel" role="dialog" aria-modal="true" aria-labelledby="model-modal-title">'
-        '<div class="model-modal__head"><h2 class="model-modal__title" id="model-modal-title"></h2>'
+        '<div class="model-modal__head"><div>'
+        '<h2 class="model-modal__title" id="model-modal-title"></h2>'
+        '<p class="model-modal__detail" id="model-modal-detail"></p></div>'
         '<button type="button" class="model-modal__close" data-model-close aria-label="關閉">×</button></div>'
-        '<div class="model-modal__body"></div></div></div>'
+        '<div class="model-modal__scroll"><div class="model-modal__body"></div></div>'
+        '<a class="model-modal__page" id="model-modal-page" hidden>查看詳情</a>'
+        '</div></div>'
         "<script>(function(){"
         'var modal=document.getElementById("model-modal");'
         "if(!modal)return;"
         'var body=modal.querySelector(".model-modal__body");'
         'var title=modal.querySelector(".model-modal__title");'
+        'var detail=modal.querySelector(".model-modal__detail");'
+        'var pageLink=document.getElementById("model-modal-page");'
         "var last=null;"
         "function close(){modal.hidden=true;document.body.classList.remove('model-open');if(last)last.focus();}"
         "function open(card,trigger){"
         'var src=card.querySelector(".model-offer-list");'
         "if(!src||!body||!title)return;"
         "body.innerHTML=src.innerHTML;"
-        'title.textContent=card.getAttribute("data-model")||card.getAttribute("data-name")||"";'
+        'var code=card.getAttribute("data-model")||"";'
+        'var name=card.getAttribute("data-name")||"";'
+        'if(name&&name!==code){title.textContent=code?code+" · "+name:name;}'
+        'else{title.textContent=code||name||"";}'
+        'if(detail){var text=card.getAttribute("data-detail")||"";'
+        'var sub=card.querySelector(".catalog-card__subtitle");'
+        'var tone=sub&&sub.classList.contains("price-out")?"price-out":(sub&&sub.classList.contains("price-in")?"price-in":"");'
+        'var split=text.indexOf(" · ");'
+        'if(tone&&text.indexOf("HK$")===0&&split>0){detail.textContent="";'
+        'var span=document.createElement("span");span.className=tone;span.textContent=text.slice(0,split);'
+        'detail.appendChild(span);detail.appendChild(document.createTextNode(text.slice(split)));}'
+        'else detail.textContent=text;}'
         "modal.hidden=false;document.body.classList.add('model-open');last=trigger;"
+        "if(pageLink){var href=trigger&&trigger.getAttribute?trigger.getAttribute('href'):'';"
+        "if(href){pageLink.hidden=false;pageLink.setAttribute('href',href);}else pageLink.hidden=true;}"
         'var btn=modal.querySelector(".model-modal__close");if(btn)btn.focus();'
         "}"
         'document.addEventListener("click",function(e){'
         'var hit=e.target.closest&&e.target.closest(".catalog-card__hit");'
-        "if(hit){var card=hit.closest('.catalog-card');if(card){e.preventDefault();open(card,hit);}return;}"
+        "if(hit){var card=hit.closest('.catalog-card');"
+        "if(card){e.preventDefault();open(card,hit);}return;}"
         'if(e.target.closest&&e.target.closest("[data-model-close]"))close();'
         "});"
         'document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!modal.hidden)close();});'
@@ -1854,10 +3256,337 @@ def model_modal_html():
     )
 
 
-def render_models_html(items, tag_filter="", stock_filter=""):
+def _tagged_buckets(entries, tag_fn):
+    buckets = {"CX": [], "BX": [], "UX": [], "BXG": [], "kuji": [], "other": []}
+    for entry in entries or []:
+        tag = tag_fn(entry)
+        buckets.get(tag, buckets["other"]).append(entry)
+    return buckets
+
+
+def model_list_row_html(group):
+    group = group or {}
+    items = sorted(list(group.get("items") or []), key=listing_display_rank)
+    if not items:
+        return ""
+    primary = items[0]
+    model = str(group.get("model") or "")
+    face = catalog_face_for_model(model) or {}
+    title = str(face.get("name") or primary.get("title") or model or primary.get("sku") or "")
+    tag = group_tag_key(group)
+    priced = current_price_items(items)
+    price_label = listing_price_label(priced)
+    stock = group_stock_key(items)
+    stock_label = group_shown_stock_label(items, stock)
+    stock_class = {"in_stock": "stock-in", "out_of_stock": "stock-out"}.get(stock, "")
+    stock_html = (
+        "<span class='%s'>%s</span>" % (stock_class, html.escape(stock_label))
+        if stock_class
+        else html.escape(stock_label)
+    )
+    shops = []
+    for item in items:
+        shop = str(item.get("shop_label") or item.get("shop_id") or "").strip()
+        if shop and shop not in shops:
+            shops.append(shop)
+    bits = []
+    shown_model = catalog_id_label(model)
+    if shown_model and shown_model != title:
+        bits.append(html.escape(shown_model))
+    if shops:
+        shown_shops = shops[:4]
+        shop_text = "、".join(shown_shops)
+        if len(shops) > len(shown_shops):
+            shop_text += "…"
+        bits.append(html.escape(shop_text))
+    if stock_html:
+        bits.append(stock_html)
+    if price_label:
+        bits.append(html.escape(price_label))
+    mall_items = [item for item in items if str(item.get("shop_id") or "") == "takaratomymall"]
+    tags_html = sale_tags_html_for_items(mall_items)
+    name = html.escape(title)
+    if model:
+        name = "<a href='%s'>%s</a>" % (html.escape(model_public_path(model), quote=True), name)
+    thumb_item = dict(primary)
+    if face.get("image") and not product_image_url(thumb_item):
+        thumb_item["image"] = face.get("image")
+    prices = listing_price_values(priced)
+    price_attr = str(int(prices[0])) if prices and float(prices[0]).is_integer() else (
+        str(prices[0]) if prices else ""
+    )
+    sku = str(primary.get("sku") or "")
+    shop_id = str(primary.get("shop_id") or "")
+    brand = str(primary.get("shop_label") or shop_id)
+    return (
+        "<article class='sku-row product-card' data-shop='%s' data-sku='%s' data-tag='%s'"
+        " data-model='%s' data-name='%s' data-price='%s' data-brand='%s'>"
+        "%s<div class='meta'><div class='name'>%s</div>%s<div class='sub'>%s</div></div></article>"
+        % (
+            html.escape(shop_id, quote=True),
+            html.escape(sku, quote=True),
+            html.escape(tag, quote=True),
+            html.escape(model, quote=True),
+            html.escape(title, quote=True),
+            html.escape(price_attr, quote=True),
+            html.escape(brand, quote=True),
+            product_thumb_html(thumb_item),
+            name,
+            tags_html,
+            " · ".join(bits),
+        )
+    )
+
+
+def _model_cards_html(groups):
+    cards = [model_grid_card_html(group) for group in groups or []]
+    cards = [card for card in cards if card]
+    if not cards:
+        return ""
+    return "<div class='model-grid'>\n%s\n</div>" % "\n".join(cards)
+
+
+def _model_block_html(groups, layout="grid"):
+    if layout == "list":
+        rows = [model_list_row_html(group) for group in groups or []]
+        rows = [row for row in rows if row]
+        return "\n".join(rows)
+    return _model_cards_html(groups)
+
+
+def _model_sections_html(groups, sort_filter="", layout="grid"):
+    buckets = _tagged_buckets(groups, group_tag_key)
+    parts = []
+    main = []
+    for tag in ("CX", "BX", "UX"):
+        main.extend(buckets[tag])
+    if sort_filter == "new":
+        main = _sort_groups_newest(main)
+    main_html = _model_block_html(main, layout)
+    if main_html:
+        parts.append(main_html)
+    for tag, label in (("BXG", "BX+"), ("kuji", "一番賞"), ("other", "other")):
+        block = _model_block_html(
+            _sort_groups_newest(buckets[tag]) if sort_filter == "new" else buckets[tag],
+            layout,
+        )
+        if not block:
+            continue
+        parts.append(
+            "<section class='model-section' id='models-%s'><h2>%s</h2>%s</section>"
+            % (html.escape(tag.lower()), html.escape(label), block)
+        )
+    return "\n".join(parts)
+
+
+_FEATURED_SHOP_SECTIONS = (
+    ("tclub", "TClub"),
+    ("takaratomymall", "Takara Tomy Mall"),
+    ("amazon-us-retail", "美版"),
+)
+
+
+def _shop_ids_for_filter(shop_filter):
+    shop_filter = str(shop_filter or "")
+    if not shop_filter or shop_filter == "all":
+        return None
+    allowed = {str(source.get("id") or "") for source in sources_for_shop_page(shop_filter)}
+    allowed.discard("")
+    if not allowed:
+        allowed = {shop_filter}
+    return allowed
+
+
+def _product_shop_options(
+    shops, current, tag_filter, stock_filter, sort_filter, include_all=False, layout="grid"
+):
+    options = []
+    if include_all:
+        options.append(
+            (
+                models_href(
+                    tag_filter or None,
+                    stock_filter or None,
+                    sort_filter or None,
+                    layout=layout,
+                ),
+                "全部現貨",
+                not current,
+            )
+        )
+    for shop in shops or []:
+        shop_id = str(shop.get("id") or "")
+        if not shop_id or shop_id == "all":
+            continue
+        options.append(
+            (
+                models_href(
+                    tag_filter or None,
+                    stock_filter or None,
+                    sort_filter or None,
+                    shop_id,
+                    layout=layout,
+                ),
+                str(shop.get("label") or shop_id),
+                shop_id == current,
+            )
+        )
+    return options
+
+
+def models_shop_grid_html(
+    shops, current_id="", tag_filter="", stock_filter="", sort_filter="", layout="grid"
+):
+    current = str(current_id or "")
+    ordered = []
+    overseas = []
+    for shop in shops or []:
+        if shop_is_overseas(shop):
+            overseas.append(shop)
+        else:
+            ordered.append(shop)
+    ordered.extend(overseas)
+    return (
+        '<div id="all-stock">%s</div>'
+        % filter_options_html(
+            _product_shop_options(
+                ordered,
+                current,
+                tag_filter,
+                stock_filter,
+                sort_filter,
+                include_all=True,
+                layout=layout,
+            ),
+            wrap_class="shop-chips",
+            force_combo=True,
+            empty_label="全部現貨",
+        )
+    )
+
+
+def _filter_model_groups(groups, stock_filter="", tag_filter="", sort_filter=""):
+    shown = list(groups or [])
+    if stock_filter in ("in_stock", "out_of_stock"):
+        shown = [
+            group
+            for group in shown
+            if any(product_stock_key(item) == stock_filter for item in group.get("items") or [])
+        ]
+    if tag_filter:
+        shown = [group for group in shown if group_tag_key(group) == tag_filter]
+    if sort_filter == "new":
+        shown = _sort_groups_newest(shown)
+    return shown
+
+
+def _tclub_special_model(code):
+    """Umbrella lines and BX+ products, the only models kept in the TClub section."""
+    text = str(code or "").upper()
+    if re.match(r"^(BX|CX|UX)-00(?:$|[^A-Z0-9])", text):
+        return True
+    return bool(re.match(r"^BX[A-Z]", text))
+
+
+def _listing_identity(item):
+    item = item or {}
+    return (
+        str(item.get("shop_id") or ""),
+        str(item.get("sku") or ""),
+        str(item.get("title") or ""),
+    )
+
+
+def _tclub_exclusive_items(items):
+    """TClub BX-00 / CX-00 / UX-00 / BX+ listings that no other shop carries."""
+    tclub_ids = set(_shop_ids_for_filter("tclub") or {"tclub"})
+    other_codes = set()
+    for item in items or []:
+        if str(item.get("shop_id") or "") in tclub_ids:
+            continue
+        code = listing_model_code(item).upper()
+        if code:
+            other_codes.add(code)
+    kept = []
+    for item in items or []:
+        if str(item.get("shop_id") or "") not in tclub_ids:
+            continue
+        code = listing_model_code(item).upper()
+        if not _tclub_special_model(code) or code in other_codes:
+            continue
+        kept.append(item)
+    return kept
+
+
+def _shop_filter_is(shop_filter, shop_id):
+    allowed = _shop_ids_for_filter(shop_filter)
+    if not allowed:
+        return False
+    ids = set(_shop_ids_for_filter(shop_id) or {shop_id})
+    return bool(allowed) and allowed <= ids
+
+
+def _featured_shop_sections_html(items, stock_filter="", tag_filter="", sort_filter="", layout="grid"):
+    mall_ids = set(_shop_ids_for_filter("takaratomymall") or {"takaratomymall"})
+    us_ids = set(_shop_ids_for_filter("amazon-us-retail") or {"amazon-us-retail"})
+    scoped_by_shop = {
+        "tclub": _tclub_exclusive_items(items),
+        "takaratomymall": [
+            item
+            for item in items or []
+            if str(item.get("shop_id") or "") in mall_ids
+        ],
+        "amazon-us-retail": [
+            item
+            for item in items or []
+            if str(item.get("shop_id") or "") in us_ids
+        ],
+    }
+    parts = []
+    for shop_id, label in _FEATURED_SHOP_SECTIONS:
+        shown = _filter_model_groups(
+            group_listings_by_model(scoped_by_shop.get(shop_id) or []),
+            stock_filter,
+            tag_filter,
+            sort_filter,
+        )
+        cards = _model_block_html(shown, layout)
+        if not cards:
+            continue
+        parts.append(
+            "<section class='model-section' id='models-%s'><h2>%s</h2>%s</section>"
+            % (html.escape(shop_id), html.escape(label), cards)
+        )
+    return "\n".join(parts)
+
+
+def render_models_html(
+    items, tag_filter="", stock_filter="", sort_filter="", shop_filter="", shops=None, layout="grid"
+):
     items = list(items or [])
+    if shops is None:
+        shops = shop_chip_shops()
+    allowed_shops = _shop_ids_for_filter(shop_filter)
+    if allowed_shops is not None:
+        items = [
+            item
+            for item in items
+            if str(item.get("shop_id") or "") in allowed_shops
+        ]
+    gallery_items = items
+    if not shop_filter:
+        hidden = {_listing_identity(item) for item in _tclub_exclusive_items(items)}
+        mall_ids = set(_shop_ids_for_filter("takaratomymall") or {"takaratomymall"})
+        us_ids = set(_shop_ids_for_filter("amazon-us-retail") or {"amazon-us-retail"})
+        gallery_items = [
+            item
+            for item in items
+            if str(item.get("shop_id") or "") not in mall_ids
+            and str(item.get("shop_id") or "") not in us_ids
+            and _listing_identity(item) not in hidden
+        ]
     groups = group_listings_by_model(items)
-    tag_counts = {"CX": 0, "BX": 0, "UX": 0, "kuji": 0, "other": 0}
+    tag_counts = {"CX": 0, "BX": 0, "UX": 0, "BXG": 0, "kuji": 0, "other": 0}
     in_count = 0
     out_count = 0
     for group in groups:
@@ -1869,26 +3598,52 @@ def render_models_html(items, tag_filter="", stock_filter=""):
             in_count += 1
         if "out_of_stock" in keys:
             out_count += 1
-    filtered = items
-    if stock_filter == "in_stock":
-        filtered = [item for item in items if product_stock_key(item) == "in_stock"]
-    elif stock_filter == "out_of_stock":
-        filtered = [item for item in items if product_stock_key(item) == "out_of_stock"]
-    shown = group_listings_by_model(filtered)
-    if tag_filter:
-        shown = [group for group in shown if group_tag_key(group) == tag_filter]
-    rendered = [model_grid_card_html(group) for group in shown]
-    rendered = [card for card in rendered if card]
-    if rendered:
-        cards = "<div class='model-grid'>\n%s\n</div>" % "\n".join(rendered)
+    shown = _filter_model_groups(groups, stock_filter, tag_filter, sort_filter if tag_filter else "")
+    gallery_shown = _filter_model_groups(
+        group_listings_by_model(gallery_items),
+        stock_filter,
+        tag_filter,
+        sort_filter if tag_filter else "",
+    )
+    if _shop_filter_is(shop_filter, "amazon-us-retail"):
+        us_groups = _filter_model_groups(
+            group_listings_by_model(gallery_items),
+            stock_filter,
+            "",
+            sort_filter,
+        )
+        cards = _model_block_html(us_groups, layout)
+        if cards:
+            cards = (
+                "<section class='model-section' id='models-amazon-us-retail'>"
+                "<h2>美版</h2>%s</section>" % cards
+            )
+    elif tag_filter:
+        cards = _model_block_html(gallery_shown, layout)
     else:
+        cards = _model_sections_html(gallery_shown, sort_filter, layout)
+    if not shop_filter:
+        featured = _featured_shop_sections_html(
+            items, stock_filter, tag_filter, sort_filter, layout
+        )
+        cards = "\n".join(part for part in (cards, featured) if part)
+    if not cards:
         cards = "<p>暫時沒有型號</p>"
 
     def stock_link(kind, text):
         on = " on" if (kind or "") == (stock_filter or "") else ""
         return '<a class="filter%s" href="%s">%s</a>' % (
             on,
-            html.escape(models_href(tag_filter or None, kind or None), quote=True),
+            html.escape(
+                models_href(
+                    tag_filter or None,
+                    kind or None,
+                    sort_filter or None,
+                    shop_filter or None,
+                    layout=layout,
+                ),
+                quote=True,
+            ),
             text,
         )
 
@@ -1896,27 +3651,102 @@ def render_models_html(items, tag_filter="", stock_filter=""):
         on = " on" if (tag or "") == (tag_filter or "") else ""
         return '<a class="filter%s" href="%s">%s</a>' % (
             on,
-            html.escape(models_href(tag or None, stock_filter or None), quote=True),
+            html.escape(
+                models_href(
+                    tag or None,
+                    stock_filter or None,
+                    sort_filter or None,
+                    shop_filter or None,
+                    layout=layout,
+                ),
+                quote=True,
+            ),
             text,
         )
 
+    def sort_link(kind, text):
+        on = " on" if (kind or "") == (sort_filter or "") else ""
+        return '<a class="filter%s" href="%s">%s</a>' % (
+            on,
+            html.escape(
+                models_href(
+                    tag_filter or None,
+                    stock_filter or None,
+                    kind or None,
+                    shop_filter or None,
+                    layout=layout,
+                ),
+                quote=True,
+            ),
+            text,
+        )
+
+    line_filters = ""
+    if not _shop_filter_is(shop_filter, "amazon-us-retail"):
+        line_filters = (
+            '<p class="filters">%s %s %s %s %s %s %s</p>'
+            % (
+                tag_link("", "All"),
+                tag_link("CX", "CX [%s]" % tag_counts["CX"]),
+                tag_link("BX", "BX [%s]" % tag_counts["BX"]),
+                tag_link("UX", "UX [%s]" % tag_counts["UX"]),
+                tag_link("BXG", "BX+ [%s]" % tag_counts["BXG"]),
+                tag_link("kuji", "一番賞 [%s]" % tag_counts["kuji"]),
+                tag_link("other", "other [%s]" % tag_counts["other"]),
+            )
+        )
     filters = (
         '<p class="filters">%s %s %s</p>'
-        '<p class="filters">%s %s %s %s %s %s</p>'
+        '<p class="filters">%s %s</p>'
+        "%s"
         % (
             stock_link("", "全部 %s" % len(groups)),
             stock_link("in_stock", "有貨 %s" % in_count),
             stock_link("out_of_stock", "缺貨 %s" % out_count),
-            tag_link("", "All"),
-            tag_link("CX", "CX [%s]" % tag_counts["CX"]),
-            tag_link("BX", "BX [%s]" % tag_counts["BX"]),
-            tag_link("UX", "UX [%s]" % tag_counts["UX"]),
-            tag_link("kuji", "一番賞 [%s]" % tag_counts["kuji"]),
-            tag_link("other", "other [%s]" % tag_counts["other"]),
+            sort_link("", "型號"),
+            sort_link("new", "最新發售"),
+            line_filters,
         )
     )
-    title = "現貨圖庫 · %s" % SITE_BRAND
-    desc = "香港爆旋陀螺現貨，按型號列出，圖片與到貨通知相同。"
+    title = "全部現貨 · %s" % SITE_BRAND
+    focus = []
+    if shop_filter:
+        focus.append(str(shop_filter))
+    if tag_filter:
+        focus.append(str(tag_filter))
+    if stock_filter == "in_stock":
+        focus.append("有貨")
+    elif stock_filter == "out_of_stock":
+        focus.append("缺貨")
+    desc = "香港爆旋陀螺型號現貨，按 BX、CX、UX 型號列出價錢同舖頭貨況。"
+    if focus:
+        desc = desc + " 篩選：%s。" % "、".join(focus)
+    model_keywords = page_keywords(*(focus + ["爆旋陀螺型號", "BX", "CX", "UX", "香港現貨", "價錢"]))
+    indexable = (
+        layout != "list"
+        and not tag_filter
+        and not stock_filter
+        and not sort_filter
+        and not shop_filter
+    )
+    shop_grid = models_shop_grid_html(
+        shops,
+        shop_filter,
+        tag_filter,
+        stock_filter,
+        sort_filter,
+        layout=layout,
+    )
+    view_switch = (
+        '<p class="filters">'
+        '<a class="filter%s" href="/product">圖庫</a> '
+        '<a class="filter%s" href="/shop/all?stock=in">列表</a>'
+        "</p>"
+        % ("" if layout == "list" else " on", " on" if layout == "list" else "")
+    )
+    index_ld = None
+    if indexable:
+        index_ld = models_index_json_ld(shown, title, desc)
     return """<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -1929,9 +3759,13 @@ def render_models_html(items, tag_filter="", stock_filter=""):
 <div class="slash" aria-hidden="true"></div>
 <div class="wrap">
 %s
-<h1 class="page-title">現貨圖庫</h1>
-<section class="panel" data-item-list-id="models" data-item-list-name="現貨圖庫">
+<h1 class="page-title">全部現貨</h1>
+<section class="panel" data-item-list-id="models" data-item-list-name="全部現貨">
+<div class="model-filters">
 %s
+%s
+%s
+</div>
 <p class="kicker">%s models</p>
 %s
 %s
@@ -1941,9 +3775,18 @@ def render_models_html(items, tag_filter="", stock_filter=""):
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, "/models", indexable=not tag_filter and not stock_filter),
+        page_seo_head(
+            title,
+            desc,
+            "/shop/all" if layout == "list" else "/product",
+            indexable=indexable,
+            keywords=model_keywords,
+            json_ld=index_ld,
+        ),
         page_theme_css(),
         site_nav_html(),
+        shop_grid,
+        view_switch,
         filters,
         html.escape(str(len(shown))),
         cards,
@@ -1993,22 +3836,71 @@ def subscribe_widget_html(label, button_class="", extra_class="", widget_id="sub
         label,
         list_id,
         threads_subscribe_desc_html(),
-        html.escape(TELEGRAM_INVITE_URL, quote=True),
-        html.escape(DISCORD_INVITE_URL, quote=True),
-        html.escape(THREADS_PROFILE_URL, quote=True),
+        outbound_href(TELEGRAM_INVITE_URL),
+        outbound_href(DISCORD_INVITE_URL),
+        outbound_href(THREADS_PROFILE_URL),
         html.escape(THREADS_SUBSCRIBE_HINT),
     )
+
+
+def go_visitor_redirect_script(dest):
+    """Leave in-app browsers for the system browser, then open the shop."""
+    return """<script>
+(function(){
+  var dest=%s;
+  var gone=false;
+  function inApp(){
+    var ua=navigator.userAgent||"";
+    return /Telegram|Instagram|FBAN|FBAV|FB_IAB|Barcelona|Threads|Line\\/|MicroMessenger|Bytedance|musical_ly|TikTok|Twitter|Discord/i.test(ua);
+  }
+  function outside(url){
+    if(!inApp()) return url;
+    var ua=navigator.userAgent||"";
+    if(/iPhone|iPad|iPod/i.test(ua) && /^https:\\/\\//i.test(url)) return "x-safari-"+url;
+    if(/Android/i.test(ua) && /^https?:\\/\\//i.test(url)){
+      var scheme=url.slice(0, url.indexOf(":"));
+      var bare=url.replace(/^https?:\\/\\//i, "");
+      return "intent://"+bare+"#Intent;scheme="+scheme+";action=android.intent.action.VIEW;S.browser_fallback_url="+encodeURIComponent(url)+";end";
+    }
+    return url;
+  }
+  function go(){
+    if(gone||!dest)return;
+    gone=true;
+    var next=outside(dest);
+    if(next===dest){
+      location.replace(dest);
+      return;
+    }
+    location.replace(next);
+  }
+  var link=document.querySelector(".go-loading a");
+  if(link){
+    link.addEventListener("click", function(event){
+      if(!dest)return;
+      event.preventDefault();
+      go();
+    });
+  }
+  if(window.gtag){
+    gtag('config','G-19VVZP9R25',{transport_type:'beacon',send_page_view:false});
+    gtag('event','page_view',{transport_type:'beacon'});
+  }
+  setTimeout(go, 500);
+})();
+</script>""" % json.dumps(str(dest or ""))
 
 
 def render_go_bounce_html(target, shop_id, sku, page_url=None):
     target = target or {}
     dest = str(target.get("dest") or "")
     title = str(target.get("title") or SITE_BRAND)
-    image = str(target.get("image") or seo_image_url())
     og_image = str(target.get("og_image") or seo_image_url())
     dest_attr = html.escape(dest, quote=True)
-    dest_js = json.dumps(dest)
     desc = product_seo_description(target, THREADS_SUBSCRIBE_DESC)
+    go_keywords = page_keywords(title, shop_id, sku, "爆旋陀螺 X", "香港現貨")
+    if desc == home_seo_description():
+        go_keywords = SITE_META_KEYWORDS
     og_w, og_h = (
         (OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT)
         if OG_IMAGE_PATH in og_image
@@ -2041,22 +3933,7 @@ background:repeating-linear-gradient(-32deg,transparent,transparent 10px,#fff 10
 </svg>
 <p><a href="%s">前往商店</a></p>
 </div>
-<script>
-(function(){
-  var dest=%s;
-  var gone=false;
-  function go(){
-    if(gone||!dest)return;
-    gone=true;
-    location.replace(dest);
-  }
-  if(window.gtag){
-    gtag('config','G-19VVZP9R25',{transport_type:'beacon',send_page_view:false});
-    gtag('event','page_view',{transport_type:'beacon'});
-  }
-  setTimeout(go, 500);
-})();
-</script>
+%s
 </body>
 </html>
 """ % (
@@ -2069,19 +3946,23 @@ background:repeating-linear-gradient(-32deg,transparent,transparent 10px,#fff 10
             image_url=og_image,
             image_width=og_w,
             image_height=og_h,
+            keywords=go_keywords,
         ),
         dest_attr,
-        dest_js,
+        go_visitor_redirect_script(dest),
     )
 
 
-def render_go_html(target, shop_id, sku, page_url=None):
+def render_go_html(target, shop_id, sku, page_url=None, auto_redirect=False):
     target = target or {}
     dest = str(target.get("dest") or "")
     title = str(target.get("title") or SITE_BRAND)
     image = str(target.get("image") or seo_image_url())
     og_image = str(target.get("og_image") or seo_image_url())
     desc = product_seo_description(target, THREADS_SUBSCRIBE_DESC)
+    go_keywords = page_keywords(title, shop_id, sku, "爆旋陀螺 X", "香港現貨")
+    if desc == home_seo_description():
+        go_keywords = SITE_META_KEYWORDS
     dest_attr = html.escape(dest, quote=True)
     og_w, og_h = (
         (OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT)
@@ -2093,6 +3974,7 @@ def render_go_html(target, shop_id, sku, page_url=None):
             "title": title,
             "url": dest,
             "image": image,
+            "image_path": target.get("image_path") or "",
             "price": target.get("price") or "",
             "status_label": target.get("status") or "",
         }
@@ -2147,18 +4029,20 @@ border:0;cursor:pointer;width:100%%;display:block}
             image_url=og_image,
             image_width=og_w,
             image_height=og_h,
+            keywords=go_keywords,
         ),
         page_theme_css(),
         site_nav_html(),
         card,
         threads_subscribe_desc_html(),
         html.escape(THREADS_SUBSCRIBE_HINT),
-        html.escape(THREADS_PROFILE_URL, quote=True),
+        outbound_href(THREADS_PROFILE_URL),
         html.escape(THREADS_SUBSCRIBE_HINT),
-        html.escape(TELEGRAM_INVITE_URL, quote=True),
-        html.escape(DISCORD_INVITE_URL, quote=True),
+        outbound_href(TELEGRAM_INVITE_URL),
+        outbound_href(DISCORD_INVITE_URL),
         dest_attr,
-        ga_events_script(),
+        ga_events_script()
+        + (go_visitor_redirect_script(dest) if auto_redirect else ""),
     )
 
 
@@ -2306,7 +4190,7 @@ def site_nav_html(subscribe=True):
         if subscribe
         else ""
     )
-    in_stock_href = html.escape(shop_products_href("all", "in_stock"), quote=True)
+    in_stock_href = "/shop/all?stock=in"
     return (
         '<nav class="site-nav">'
         '<div class="nav-start">'
@@ -2327,8 +4211,8 @@ def site_nav_html(subscribe=True):
         "</div>"
         '<nav class="nav-drawer-links">'
         '<a href="/shops">店舖現況</a>'
-        '<a href="%s">全部現貨</a>'
-        '<a href="/models">現貨圖庫</a>'
+        '<a href="/product">全部現貨</a>'
+        '<a href="%s">列表</a>'
         '<a href="/history">最新通知</a>'
         "</nav>"
         '<div class="nav-drawer-subscribe">%s</div>'
@@ -2343,7 +4227,7 @@ def site_nav_html(subscribe=True):
     )
 
 
-def filter_options_html(items, wrap_class="filters", combo_label="", force_combo=False):
+def filter_options_html(items, wrap_class="filters", combo_label="", force_combo=False, empty_label="All"):
     items = list(items or [])
     heading = ""
     if combo_label:
@@ -2364,7 +4248,7 @@ def filter_options_html(items, wrap_class="filters", combo_label="", force_combo
         if not combo_label:
             return body
         return '<div class="filter-store">%s%s</div>' % (heading, body)
-    current_label = "All"
+    current_label = empty_label
     for href, label, selected in items:
         if selected:
             current_label = str(label)
@@ -2379,16 +4263,17 @@ def filter_options_html(items, wrap_class="filters", combo_label="", force_combo
         )
         for href, label, selected in items
     )
-    aria = html.escape(combo_label or "Filter", quote=True)
+    aria = html.escape(combo_label or empty_label or "Filter", quote=True)
     combo = (
         '<div class="filter-combo %s">'
         '<div class="filter-combo-field">'
-        '<input type="search" class="filter-combo-input" placeholder="All" value="%s"'
+        '<input type="search" class="filter-combo-input" placeholder="%s" value="%s"'
         ' autocomplete="off" spellcheck="false" aria-label="%s">'
         '<button type="button" class="filter-combo-arrow" tabindex="-1" aria-label="%s">▾</button>'
         '<div class="filter-combo-list" hidden>%s</div></div></div>'
     ) % (
         html.escape(wrap_class, quote=True),
+        html.escape(empty_label, quote=True),
         html.escape(current_label, quote=True),
         aria,
         aria,
@@ -2458,14 +4343,34 @@ def render_products_html(shop, items, key_query="", stock_filter="", tag_filter=
         shops = [shop]
     chips = shop_chips_html(shops, shop.get("id") or "")
     label = html.escape(str(shop.get("label") or shop.get("id") or "Shop"))
-    shown = filter_shop_products(items, stock_filter, tag_filter)
-    rows = []
-    for item in shown:
+    us_shop = _shop_filter_is(shop.get("id") or "", "amazon-us-retail")
+    shown = filter_shop_products(items, stock_filter, "" if us_shop else tag_filter)
+
+    def shop_row(item):
         row = dict(item)
         if shop.get("label") and not row.get("shop_label"):
             row["shop_label"] = shop.get("label")
-        rows.append(product_card_html(row, shop.get("id") or ""))
-    cards = "\n".join(rows) or "<p>這個商店暫時沒有商品</p>"
+        if us_shop and not row.get("shop_id"):
+            row["shop_id"] = shop.get("id") or ""
+        return product_card_html(row, shop.get("id") or "")
+
+    if us_shop:
+        cards = "\n".join(shop_row(item) for item in shown) or "<p>這個商店暫時沒有商品</p>"
+    elif tag_filter or not shown:
+        cards = "\n".join(shop_row(item) for item in shown) or "<p>這個商店暫時沒有商品</p>"
+    else:
+        buckets = _tagged_buckets(shown, product_tag_key)
+        parts = []
+        main = []
+        for tag in ("CX", "BX", "UX"):
+            main.extend(buckets[tag])
+        if main:
+            parts.append("\n".join(shop_row(item) for item in main))
+        for tag, label in (("kuji", "一番賞"), ("other", "other")):
+            block = "\n".join(shop_row(item) for item in buckets[tag])
+            if block:
+                parts.append("<h2 class='list-section' id='shop-%s'>%s</h2>\n%s" % (tag, html.escape(label), block))
+        cards = "\n".join(parts) or "<p>這個商店暫時沒有商品</p>"
     shop_id = shop.get("id") or ""
     in_count = sum(1 for item in (items or []) if product_stock_key(item) == "in_stock")
     out_count = sum(1 for item in (items or []) if product_stock_key(item) == "out_of_stock")
@@ -2491,23 +4396,40 @@ def render_products_html(shop, items, key_query="", stock_filter="", tag_filter=
             text,
         )
 
+    line_filters = ""
+    if not us_shop:
+        line_filters = (
+            '<p class="filters">%s %s %s %s %s %s</p>'
+            % (
+                tag_link("", "All"),
+                tag_link("CX", "CX [%s]" % tag_counts["CX"]),
+                tag_link("BX", "BX [%s]" % tag_counts["BX"]),
+                tag_link("UX", "UX [%s]" % tag_counts["UX"]),
+                tag_link("kuji", "一番賞 [%s]" % tag_counts["kuji"]),
+                tag_link("other", "other [%s]" % tag_counts["other"]),
+            )
+        )
     filters = (
         '<p class="filters">%s %s %s</p>'
-        '<p class="filters">%s %s %s %s %s %s</p>'
+        "%s"
         % (
             filter_link("", "全部 %s" % len(items or [])),
             filter_link("in_stock", "有貨 %s" % in_count),
             filter_link("out_of_stock", "缺貨 %s" % out_count),
-            tag_link("", "All"),
-            tag_link("CX", "CX [%s]" % tag_counts["CX"]),
-            tag_link("BX", "BX [%s]" % tag_counts["BX"]),
-            tag_link("UX", "UX [%s]" % tag_counts["UX"]),
-            tag_link("kuji", "一番賞 [%s]" % tag_counts["kuji"]),
-            tag_link("other", "other [%s]" % tag_counts["other"]),
+            line_filters,
         )
     )
     indexable = not stock_filter and not tag_filter
     seo_title, seo_desc = shop_page_seo(shop, items, indexable=indexable)
+    shop_keywords = page_keywords(
+        shop.get("label") or shop.get("id"),
+        stock_filter,
+        tag_filter,
+        "爆旋陀螺庫存",
+        "有貨",
+        "缺貨",
+        "爆旋陀螺開訂",
+    )
     shop_path = shop_products_href(shop_id)
     list_id = html.escape(str(shop_id), quote=True)
     list_name = html.escape(str(shop.get("label") or shop.get("id") or "Shop"), quote=True)
@@ -2535,7 +4457,7 @@ def render_products_html(shop, items, key_query="", stock_filter="", tag_filter=
 </body>
 </html>
 """ % (
-        page_seo_head(seo_title, seo_desc, shop_path, indexable=indexable),
+        page_seo_head(seo_title, seo_desc, shop_path, indexable=indexable, keywords=shop_keywords),
         page_theme_css(),
         site_nav_html(),
         label,
@@ -2583,7 +4505,13 @@ def render_admin_login_html(error=False):
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, "/login", indexable=False),
+        page_seo_head(
+            title,
+            desc,
+            "/login",
+            indexable=False,
+            keywords=page_keywords("admin login", "HK BeybladeX Watch"),
+        ),
         page_theme_css(),
         html.escape(SITE_ORIGIN, quote=True),
         html.escape(cdn_image_url(LOGO_PATH), quote=True),
@@ -2664,7 +4592,13 @@ def render_notify_test_html():
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, "/notify-test", indexable=True),
+        page_seo_head(
+            title,
+            desc,
+            "/notify-test",
+            indexable=False,
+            keywords=page_keywords("notify test", "Discord", "Telegram", "Threads"),
+        ),
         page_theme_css(),
         html.escape(SITE_ORIGIN, quote=True),
         html.escape(cdn_image_url(LOGO_PATH), quote=True),
@@ -2707,14 +4641,12 @@ def notify_rows_html(rows, today=None):
         url = item.get("url") or ""
         if url:
             name = "<a href='%s' target='_blank' rel='noopener'>%s</a>" % (
-                html.escape(str(url), quote=True),
+                outbound_href(url),
                 title,
             )
         else:
             name = title
-        price = str(item.get("price") or "").strip()
-        if price and not price.upper().startswith("HK"):
-            price = "HK$%s" % price
+        price = shown_price_text(item)
         meta = " · ".join(
             part
             for part in (
