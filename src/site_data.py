@@ -117,7 +117,7 @@ EDGE_PURGE_LOG_KEEP_DAYS = 3
 EDGE_PURGE_LOG_NAME = "edge_purge.jsonl"
 GO_CACHE_CONTROL = "public, max-age=300, s-maxage=86400, stale-if-error=604800"
 # Bump when /go preview HTML changes. Telegram caches each full URL.
-GO_LINK_VERSION = "2"
+GO_LINK_VERSION = "3"
 IMAGE_CACHE_CONTROL = "public, max-age=31536000, s-maxage=31536000, immutable"
 PAGE_CACHE_TTL = 30
 LISTING_WATCH_INTERVAL = 2
@@ -639,8 +639,8 @@ def go_http_result(path, query="", cookie="", remember=False, force_store=False,
     # Browsers see a loading hop for 0.5s, then leave for the shop. Preview
     # crawlers get the product card and do not redirect, so the link preview
     # stays on this page. Cloudflare does not vary /go on User-Agent, so this
-    # response must not be stored at the edge. pv=2 on notify links is unchanged;
-    # Telegram still keys its own preview cache by the full URL.
+    # response must not be stored at the edge. Notify links carry pv so Telegram
+    # and Discord treat a preview-template change as a new URL.
     del remember, force_store
     crawler = is_preview_crawler(user_agent)
     page_url = go_request_url(path, query)

@@ -1087,6 +1087,7 @@ class StatusPageTests(unittest.TestCase):
         self.assertNotIn("key=abc", page)
         self.assertIn("FookLeModel 爆旋陀螺", page)
         self.assertIn("index, follow", page)
+        self.assertIn('name="twitter:card" content="summary_large_image"', page)
         self.assertIn("og:image", page)
         self.assertIn("/og-card.jpg", page)
         self.assertIn('property="og:image:width" content="1200"', page)
@@ -1588,11 +1589,11 @@ class GoTrackTests(unittest.TestCase):
         )
         self.assertEqual(
             go_href("uat", "test", source="discord"),
-            "https://hkbeybladex.com/go/uat/test?from=discord&utm_source=discord&utm_medium=notify&utm_campaign=stock_alert&utm_content=uat-test&pv=2",
+            "https://hkbeybladex.com/go/uat/test?from=discord&utm_source=discord&utm_medium=notify&utm_campaign=stock_alert&utm_content=uat-test&pv=3",
         )
         self.assertEqual(
             go_href("uat", "test", source="threads"),
-            "https://hkbeybladex.com/go/uat/test?from=threads&utm_source=threads&utm_medium=notify&utm_campaign=stock_alert&utm_content=uat-test&pv=2",
+            "https://hkbeybladex.com/go/uat/test?from=threads&utm_source=threads&utm_medium=notify&utm_campaign=stock_alert&utm_content=uat-test&pv=3",
         )
         self.assertIsNone(parse_go_path("/shop/uat"))
         self.assertIsNone(parse_go_path("/go/uat"))
@@ -1674,7 +1675,7 @@ class GoTrackTests(unittest.TestCase):
         )
         self.assertEqual(
             wrapped[0]["link"],
-            "https://hkbeybladex.com/go/uat/test?from=telegram&utm_source=telegram&utm_medium=notify&utm_campaign=stock_alert&utm_content=uat-test&pv=2",
+            "https://hkbeybladex.com/go/uat/test?from=telegram&utm_source=telegram&utm_medium=notify&utm_campaign=stock_alert&utm_content=uat-test&pv=3",
         )
 
     def test_wrap_warm_uses_go_when_cloudflare_ready(self):
@@ -1687,7 +1688,7 @@ class GoTrackTests(unittest.TestCase):
         )
         self.assertEqual(
             wrapped[0]["link"],
-            "https://hkbeybladex.com/go/uat/test?from=discord&utm_source=discord&utm_medium=notify&utm_campaign=stock_alert&utm_content=uat-test&pv=2",
+            "https://hkbeybladex.com/go/uat/test?from=discord&utm_source=discord&utm_medium=notify&utm_campaign=stock_alert&utm_content=uat-test&pv=3",
         )
 
     def test_wrap_warm_falls_back_to_store_when_probe_fails(self):
@@ -1780,6 +1781,7 @@ class GoTrackTests(unittest.TestCase):
             result["html"],
         )
         self.assertIn("og-card.jpg", result["html"])
+        self.assertIn('name="twitter:card" content="summary"', result["html"])
         self.assertNotIn('http-equiv="refresh"', result["html"])
         self.assertNotIn("location.replace(dest)", result["html"])
         self.assertNotIn("go-loading", result["html"])
@@ -1852,6 +1854,8 @@ class GoTrackTests(unittest.TestCase):
         page = render_go_html(go_page_target("uat", "test"), "uat", "test")
         self.assertIn("index, follow", page)
         self.assertNotIn("noindex, nofollow", page)
+        self.assertIn('name="twitter:card" content="summary"', page)
+        self.assertNotIn("summary_large_image", page)
         self.assertIn(
             'property="og:url" content="https://hkbeybladex.com/go/uat/test"',
             page,
@@ -1864,6 +1868,7 @@ class GoTrackTests(unittest.TestCase):
             page,
         )
         bounce = render_go_bounce_html(go_page_target("uat", "test"), "uat", "test")
+        self.assertIn('name="twitter:card" content="summary"', bounce)
         self.assertIn(
             'property="og:description" content="Hobbyland 爆旋陀螺新品預訂分類，官方授權香港代理商品。"',
             bounce,
@@ -1999,6 +2004,8 @@ class GoTrackTests(unittest.TestCase):
                 page,
             )
             self.assertIn('property="og:image:type" content="image/jpeg"', page)
+            self.assertIn('name="twitter:card" content="summary"', page)
+            self.assertNotIn('property="og:image:width"', page)
             self.assertNotIn("shoplineimg.com/5f8928fdb9748d005312ca75", page.split('property="og:image"')[1][:300])
         finally:
             mod.DATA_DIR = old

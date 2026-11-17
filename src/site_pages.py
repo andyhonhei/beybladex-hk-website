@@ -432,6 +432,7 @@ def page_seo_head(
     og_type="website",
     json_ld=None,
     keywords=None,
+    twitter_card="summary_large_image",
 ):
     robots = "index, follow" if indexable else "noindex, nofollow"
     page_url = canonical_url or page_canonical(path)
@@ -444,9 +445,19 @@ def page_seo_head(
         if origin in ("", "local", "-"):
             origin = SITE_ORIGIN
         img_src = origin.rstrip("/") + img_src
+    card = (
+        twitter_card
+        if twitter_card in ("summary", "summary_large_image")
+        else "summary_large_image"
+    )
     if not image_width and not image_height and OG_IMAGE_PATH in str(img_src):
         image_width, image_height = OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT
-    elif not image_width and not image_height and "/images/" in str(img_src):
+    elif (
+        card != "summary"
+        and not image_width
+        and not image_height
+        and "/images/" in str(img_src)
+    ):
         image_width, image_height = 800, 800
     canon = html.escape(page_url, quote=True)
     share = html.escape(share_url, quote=True)
@@ -499,7 +510,7 @@ def page_seo_head(
 <meta property="og:url" content="%s">
 <meta property="og:image" content="%s">
 %s
-<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:card" content="%s">
 <meta name="twitter:title" content="%s">
 <meta name="twitter:description" content="%s">
 <meta name="twitter:image" content="%s">
@@ -533,6 +544,7 @@ gtag('config', 'G-19VVZP9R25');
         share,
         img,
         extra_og,
+        card,
         t,
         d,
         img,
@@ -4001,6 +4013,7 @@ background:repeating-linear-gradient(-32deg,transparent,transparent 10px,#fff 10
             image_width=og_w,
             image_height=og_h,
             keywords=go_keywords,
+            twitter_card="summary",
         ),
         dest_attr,
         go_visitor_redirect_script(dest),
@@ -4084,6 +4097,7 @@ border:0;cursor:pointer;width:100%%;display:block}
             image_width=og_w,
             image_height=og_h,
             keywords=go_keywords,
+            twitter_card="summary",
         ),
         page_theme_css(),
         site_nav_html(),
