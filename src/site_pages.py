@@ -117,7 +117,6 @@ def page_theme_css():
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;background:var(--blue);color:#fff;
 font-family:Inter,system-ui,sans-serif;overflow-x:hidden}
-body.hint-open{padding-bottom:88px}
 .slash{position:fixed;right:0;top:12%;width:120px;height:70%;pointer-events:none;
 background:repeating-linear-gradient(-32deg,transparent,transparent 10px,#fff 10px,#fff 11px);
 opacity:.35}
@@ -297,14 +296,6 @@ font-size:11px;line-height:1.55;letter-spacing:.02em}
 .bundle-price{font-family:"IBM Plex Mono",monospace}
 .skip-btn{flex:0 0 auto;min-height:44px;min-width:64px;background:transparent;border:1px solid var(--ink);padding:8px 12px;cursor:pointer;font-size:13px}
 .toolbar{margin:0 0 16px}
-.install-hint{display:none;position:fixed;left:0;right:0;bottom:0;z-index:30;
-background:#fff;color:var(--ink);border-top:1px solid #d8d8f0;padding:12px 18px;
-align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.install-hint.show{display:flex}
-.install-hint p{margin:0;font-size:14px;flex:1;min-width:200px}
-.install-hint .kicker{margin:4px 0 0;letter-spacing:.08em;font-size:11px;color:#555}
-.install-hint button{background:transparent;color:var(--ink);border:1px solid var(--ink);padding:8px 12px;cursor:pointer;
-font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;flex:0 0 auto}
 footer{margin-top:36px;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;
 text-transform:uppercase;opacity:.85}
 footer a{color:#fff}
@@ -554,62 +545,6 @@ gtag('config', 'G-19VVZP9R25');
     )
 
 
-def install_hint_html():
-    return (
-        """
-<aside class="install-hint" id="install-hint" hidden>
-<div>
-<p>把 %s 加入主畫面，之後一點就開首頁睇各店狀態。</p>
-<p class="kicker">iPhone：分享 → 加入主畫面 · Android：選單 → 加入主畫面 / 安裝應用程式</p>
-</div>
-<button type="button" id="install-dismiss">關閉</button>
-</aside>
-""".strip()
-        % html.escape(SITE_BRAND)
-    )
-
-
-def install_hint_script():
-    return """
-<script>
-(function(){
-  var CLOSED = "bxw-install-closed";
-  var VISITS = "bxw-install-visits";
-  var SESSION = "bxw-install-session";
-  var box = document.getElementById("install-hint");
-  var btn = document.getElementById("install-dismiss");
-  if (!box) return;
-  function hide(){
-    box.classList.remove("show");
-    box.setAttribute("hidden", "");
-    document.body.classList.remove("hint-open");
-  }
-  function show(){
-    box.removeAttribute("hidden");
-    box.classList.add("show");
-    document.body.classList.add("hint-open");
-  }
-  try {
-    if (localStorage.getItem(CLOSED) === "1") { hide(); return; }
-    if (!sessionStorage.getItem(SESSION)) {
-      sessionStorage.setItem(SESSION, "1");
-      var n = parseInt(localStorage.getItem(VISITS) || "0", 10);
-      if (isNaN(n)) n = 0;
-      localStorage.setItem(VISITS, String(n + 1));
-    }
-    var visits = parseInt(localStorage.getItem(VISITS) || "0", 10);
-    if (visits >= 1 && visits <= 3) show();
-    else hide();
-  } catch (e) { show(); }
-  if (btn) btn.onclick = function(){
-    try { localStorage.setItem(CLOSED, "1"); } catch (e) {}
-    hide();
-  };
-})();
-</script>
-""".strip()
-
-
 def ga_events_script():
     return (
         "<script>(function(){"
@@ -664,11 +599,7 @@ def ga_events_script():
 
 def install_hint_block():
     return (
-        install_hint_html()
-        + "\n"
-        + install_hint_script()
-        + "\n"
-        + subscribe_script()
+        subscribe_script()
         + "\n"
         + nav_drawer_script()
         + "\n"
@@ -3039,7 +2970,6 @@ def render_model_detail_html(code, items=None):
 .model-stock .stock-out{color:var(--ink);background:#ececf8}
 .model-stock .price-in,.model-stock .price-out{color:inherit}
 .model-empty{padding:10px;border:1px dashed #ddd;color:#666;font-size:13px}
-body:has(.install-hint.show) .model-page{padding-bottom:108px}
 @media(min-width:700px){
 .wrap:has(.model-page){padding:16px 24px 36px}
 .model-page{margin-top:14px;padding:14px 16px 16px}
