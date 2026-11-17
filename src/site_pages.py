@@ -3910,15 +3910,35 @@ def subscribe_widget_html(label, button_class="", extra_class="", widget_id="sub
 
 
 def go_visitor_redirect_script(dest):
-    """Open the shop in the current browser, including Threads and other in-app browsers."""
+    """Leave in-app browsers for the system browser, then open the shop."""
     return """<script>
 (function(){
   var dest=%s;
   var gone=false;
+  function inApp(){
+    var ua=navigator.userAgent||"";
+    return /Telegram|Instagram|FBAN|FBAV|FB_IAB|Barcelona|Threads|Line\\/|MicroMessenger|Bytedance|musical_ly|TikTok|Twitter|Discord/i.test(ua);
+  }
+  function outside(url){
+    if(!inApp()) return url;
+    var ua=navigator.userAgent||"";
+    if(/iPhone|iPad|iPod/i.test(ua) && /^https:\\/\\//i.test(url)) return "x-safari-"+url;
+    if(/Android/i.test(ua) && /^https?:\\/\\//i.test(url)){
+      var scheme=url.slice(0, url.indexOf(":"));
+      var bare=url.replace(/^https?:\\/\\//i, "");
+      return "intent://"+bare+"#Intent;scheme="+scheme+";action=android.intent.action.VIEW;S.browser_fallback_url="+encodeURIComponent(url)+";end";
+    }
+    return url;
+  }
   function go(){
     if(gone||!dest)return;
     gone=true;
-    location.replace(dest);
+    var next=outside(dest);
+    if(next===dest){
+      location.replace(dest);
+      return;
+    }
+    location.replace(next);
   }
   var link=document.querySelector(".go-loading a");
   if(link){
