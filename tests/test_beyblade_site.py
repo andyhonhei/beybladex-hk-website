@@ -460,10 +460,12 @@ class StatusPageTests(unittest.TestCase):
 
     def test_subscribe_page_lists_channels_and_is_hidden_from_nav(self):
         page = render_subscribe_html()
+        section = page.split('class="panel subscribe-page"', 1)[1].split("</section>", 1)[0]
         self.assertIn("訂閱通知", page)
-        self.assertIn(explore_href("https://t.me/+mbTPVeGFBalhMjQ9"), page)
-        self.assertIn(explore_href("https://discord.gg/C8Q5gZf3y5"), page)
-        self.assertIn(explore_href("https://www.threads.com/@hkbeybladex_com"), page)
+        self.assertIn('href="https://t.me/+mbTPVeGFBalhMjQ9"', section)
+        self.assertIn('href="https://discord.gg/C8Q5gZf3y5"', section)
+        self.assertIn('href="https://www.threads.com/@hkbeybladex_com"', section)
+        self.assertNotIn("/explore/?url=", section)
         self.assertIn("加入群組", page)
         self.assertIn("加入頻道", page)
         self.assertIn("鐘仔", page)
@@ -1875,8 +1877,8 @@ class GoTrackTests(unittest.TestCase):
         )
         self.assertIn("location.replace(dest)", bounce)
         self.assertIn("setTimeout(go, 500)", bounce)
-        self.assertIn("x-safari-", bounce)
-        self.assertIn("intent://", bounce)
+        self.assertNotIn("x-safari-", bounce)
+        self.assertNotIn("intent://", bounce)
         self.assertIn("go-loading", bounce)
         self.assertNotIn('http-equiv="refresh"', bounce)
         self.assertIn(explore_href("https://discord.gg/C8Q5gZf3y5"), page)
