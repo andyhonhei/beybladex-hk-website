@@ -2653,6 +2653,65 @@ class NotifyHistoryHtmlTests(unittest.TestCase):
         )
         self.assertIn("HK$199", html)
 
+    def test_notify_rows_html_fills_amazon_price_from_listing(self):
+        import site_data as mod
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        old_data = mod.DATA_DIR
+        old_mysql = mod.mysql_settings
+        self.addCleanup(lambda: setattr(mod, "DATA_DIR", old_data))
+        self.addCleanup(lambda: setattr(mod, "mysql_settings", old_mysql))
+        self.addCleanup(lambda: apply_config({}))
+        mod.DATA_DIR = tmp.name
+        mod.mysql_settings = lambda: {"enabled": False}
+        apply_config(
+            {
+                "sources": [
+                    {
+                        "id": "amazon-jp-retail",
+                        "enabled": True,
+                        "state": "amazon_jp_retail_seen_skus.json",
+                    }
+                ]
+            }
+        )
+        with open(
+            os.path.join(tmp.name, "amazon_jp_retail_seen_skus.json"),
+            "w",
+            encoding="utf-8",
+        ) as fh:
+            json.dump(
+                {
+                    "skus": ["B0HJ75X3PN"],
+                    "products": [
+                        {
+                            "sku": "B0HJ75X3PN",
+                            "title": "BX-53",
+                            "price": "2300",
+                            "currency": "JPY",
+                        }
+                    ],
+                },
+                fh,
+            )
+        with mock.patch.object(mod, "fx_hkd_rate", return_value=0.05):
+            page = notify_rows_html(
+                [
+                    {
+                        "at": "2026-11-17 21:16:32",
+                        "shop_id": "amazon-jp-retail",
+                        "shop": "Amazon.co.jp 直販",
+                        "event": "restock",
+                        "title": "BX-53",
+                        "sku": "B0HJ75X3PN",
+                        "price": "",
+                        "change": "缺貨 → 有貨",
+                    }
+                ]
+            )
+        self.assertIn("JPY¥2300", page)
+
     def test_notify_rows_html_marks_last_days(self):
         from datetime import date
 

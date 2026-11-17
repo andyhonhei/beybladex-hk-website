@@ -2072,7 +2072,7 @@ def _blank_image_value(val):
 def lookup_sku_image_fields(shop_id, sku, cfg=None):
     shop_id = str(shop_id or "")
     sku = str(sku or "")
-    out = {"image": "", "image_path": ""}
+    out = {"image": "", "image_path": "", "price": "", "currency": ""}
     if not shop_id or not sku:
         return out
     if mysql_settings().get("enabled"):
@@ -2081,14 +2081,15 @@ def lookup_sku_image_fields(shop_id, sku, cfg=None):
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT image, image_path FROM seen_skus "
+                        "SELECT image, image_path, price FROM seen_skus "
                         "WHERE shop_id = %s AND sku = %s LIMIT 1",
                         (shop_id, sku),
                     )
                     row = cur.fetchone() or {}
                     out["image"] = row.get("image") or ""
                     out["image_path"] = row.get("image_path") or ""
-                    if out["image"] or out["image_path"]:
+                    out["price"] = row.get("price") or ""
+                    if out["image"] or out["image_path"] or out["price"]:
                         return out
             finally:
                 conn.close()
@@ -2102,12 +2103,20 @@ def lookup_sku_image_fields(shop_id, sku, cfg=None):
             continue
         out["image"] = item.get("image") or product_image_url(item) or ""
         out["image_path"] = item.get("image_path") or ""
+        out["price"] = item.get("price") or ""
+        out["currency"] = item.get("currency") or ""
         break
     return out
 
 
 def history_row_for_display(row):
     item = dict(row or {})
+    if not str(item.get("price") or "").strip():
+        found = lookup_sku_image_fields(item.get("shop_id"), item.get("sku"))
+        if str(found.get("price") or "").strip():
+            item["price"] = found.get("price")
+            if not str(item.get("currency") or "").strip() and found.get("currency"):
+                item["currency"] = found.get("currency")
     image = item.get("image")
     image_path = item.get("image_path")
     if _blank_image_value(image) or _blank_image_value(image_path):
