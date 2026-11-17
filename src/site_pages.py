@@ -743,6 +743,7 @@ def sitemap_xml(cfg=None, browser_catalog_dir_override=None):
         OG_HOME_PATH,
         "/shops",
         "/product",
+        "/history",
         "/catalog",
         "/parts",
         "/collection",
@@ -1147,6 +1148,51 @@ def site_footer_html():
     )
 
 
+def render_not_found_html():
+    title = "找不到頁面 · HK BEYBLADEX.COM"
+    desc = "呢個網址冇對應頁面。"
+    return """<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+%s
+<style>
+%s
+.not-found-kicker{font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.2em;
+text-transform:uppercase;margin:28px 0 0}
+.not-found-en{opacity:.8}
+</style>
+</head>
+<body>
+<div class="slash" aria-hidden="true"></div>
+<div class="wrap">
+%s
+<p class="not-found-kicker">404</p>
+<h1 class="page-title">找不到頁面</h1>
+<section class="panel">
+<p class="coffee-copy">呢個網址冇對應頁面。</p>
+<p class="coffee-copy not-found-en">This address does not match a page.</p>
+<a class="coffee-cta" href="/">返回首頁</a>
+</section>
+%s
+</div>
+%s
+</body>
+</html>
+""" % (
+        page_seo_head(
+            title,
+            desc,
+            "/404",
+            indexable=False,
+            keywords=page_keywords("找不到頁面", "404"),
+        ),
+        page_theme_css(),
+        site_nav_html(),
+        site_footer_html(),
+        install_hint_block(),
+    )
+
+
 def render_coffee_html():
     title = "請我飲杯咖啡 · %s" % SITE_BRAND
     desc = "呢個係完全免費嘅香港爆旋陀螺到貨通知專案。伺服器同開發都有成本，請我飲杯咖啡可以幫我繼續做落去。"
@@ -1506,6 +1552,14 @@ def render_history_html(rows, shops=None, shop_id="", model="", start=None, end=
         picked = "、".join(part for part in (str(shop_id or ""), str(model or "")) if part)
         desc = "香港爆旋陀螺到貨紀錄，篩選 %s。" % picked
     history_keywords = page_keywords("最新通知", shop_id, model, "到貨紀錄", "爆旋陀螺補貨")
+    default_start, default_end = history_query_dates("", "", now=now)
+    indexable = (
+        src == NOTIFY_SRC_HK
+        and not shop_id
+        and not model
+        and start == default_start
+        and end == default_end
+    )
     return """<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -1528,7 +1582,7 @@ def render_history_html(rows, shops=None, shop_id="", model="", start=None, end=
 </body>
 </html>
 """ % (
-        page_seo_head(title, desc, "/history", indexable=False, keywords=history_keywords),
+        page_seo_head(title, desc, "/history", indexable=indexable, keywords=history_keywords),
         page_theme_css(),
         site_nav_html(),
         history_filter_chips_html(shops, models, shop_id, model, start, end, src=src),

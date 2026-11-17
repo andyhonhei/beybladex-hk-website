@@ -71,6 +71,7 @@ from site_pages import (
     render_history_html,
     render_model_detail_html,
     render_models_html,
+    render_not_found_html,
     render_notify_test_html,
     render_og_test_html,
     render_privacy_html,
@@ -112,6 +113,15 @@ def start_status_server():
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
+
+        def _not_found_page(self):
+            self._bytes(
+                404,
+                "text/html; charset=utf-8",
+                render_not_found_html().encode("utf-8"),
+                cache="no-store",
+                robots="noindex, nofollow",
+            )
 
         def _json(self, code, payload):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -315,7 +325,7 @@ def start_status_server():
                     user_agent=self.headers.get("User-Agent") or "",
                 )
                 if result.get("status") == 404:
-                    self.send_error(404)
+                    self._not_found_page()
                     return
                 self._bytes(
                     200,
@@ -356,7 +366,7 @@ def start_status_server():
             if catalog_hit:
                 result = handle_catalog_http(parsed.path, parsed.query)
                 if not result or result.get("status") == 404:
-                    self.send_error(404)
+                    self._not_found_page()
                     return
                 if result.get("file"):
                     with open(result["file"], "rb") as fh:
@@ -411,12 +421,16 @@ def start_status_server():
                     ).encode("utf-8")
 
                 body = cached_bytes(cache_key, _history_page)
+                filtered = any(
+                    (qs.get(key) or [""])[0]
+                    for key in ("shop", "model", "src", "from", "to")
+                )
                 self._bytes(
                     200,
                     "text/html; charset=utf-8",
                     body,
                     cache=HTML_CACHE_CONTROL,
-                    robots="noindex, nofollow",
+                    robots="noindex, nofollow" if filtered else None,
                 )
                 return
             if parsed.path == "/login":
@@ -480,7 +494,7 @@ def start_status_server():
             if parsed.path.startswith("/product/"):
                 code = urllib.parse.unquote(parsed.path[len("/product/"):].strip("/"))
                 if not code or "/" in code:
-                    self.send_error(404)
+                    self._not_found_page()
                     return
                 cache_key = parsed.path
 
@@ -494,7 +508,7 @@ def start_status_server():
 
                 body = cached_bytes(cache_key, _model_page)
                 if not body:
-                    self.send_error(404)
+                    self._not_found_page()
                     return
                 self._bytes(
                     200,
@@ -507,7 +521,7 @@ def start_status_server():
                 shop_id = urllib.parse.unquote(parsed.path[len("/shop/"):].strip("/"))
                 meta = shop_page_meta(shop_id)
                 if not meta:
-                    self.send_error(404)
+                    self._not_found_page()
                     return
                 stock_filter = stock_filter_from_query(parsed.query)
                 tag_filter = tag_filter_from_query(parsed.query)
@@ -590,12 +604,16 @@ def start_status_server():
                     ).encode("utf-8")
 
                 body = cached_bytes(cache_key, _history_page)
+                filtered = any(
+                    (qs.get(key) or [""])[0]
+                    for key in ("shop", "model", "src", "from", "to")
+                )
                 self._bytes(
                     200,
                     "text/html; charset=utf-8",
                     body,
                     cache=HTML_CACHE_CONTROL,
-                    robots="noindex, nofollow",
+                    robots="noindex, nofollow" if filtered else None,
                 )
                 return
             if parsed.path == "/shops":
@@ -668,7 +686,7 @@ def start_status_server():
                 )
                 return
             if parsed.path not in ("/", "/status", "/index.html", "/watch", OG_HOME_PATH):
-                self.send_error(404)
+                self._not_found_page()
                 return
             ua = self.headers.get("User-Agent") or ""
             if is_preview_crawler(ua):

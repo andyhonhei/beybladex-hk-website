@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 import urllib.error
+import urllib.request
 from unittest import mock
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -73,6 +74,7 @@ from site_pages import (
     render_go_html,
     render_history_html,
     render_models_html,
+    render_not_found_html,
     render_notify_test_html,
     render_og_test_html,
     render_privacy_html,
@@ -407,6 +409,38 @@ class StatusPageTests(unittest.TestCase):
             notifies=[],
         )
         self.assertNotIn('href="/coffee"', page)
+
+    def test_unknown_url_is_a_branded_404_page(self):
+        page = render_not_found_html()
+        self.assertIn("找不到頁面", page)
+        self.assertIn("HK BEYBLADEX.COM", page)
+        self.assertIn("呢個網址冇對應頁面", page)
+        self.assertIn('href="/"', page)
+        self.assertIn("noindex, nofollow", page)
+        self.assertNotIn("倉庫", page)
+
+        import beyblade_site
+
+        apply_config(
+            {"status": {"enabled": True, "host": "127.0.0.1", "port": 18764}}
+        )
+        server = beyblade_site.start_status_server()
+        try:
+            class _Keep(urllib.request.HTTPErrorProcessor):
+                def http_response(self, request, response):
+                    return response
+
+                https_response = http_response
+
+            opener = urllib.request.build_opener(_Keep)
+            response = opener.open("http://127.0.0.1:18764/this-page-does-not-exist")
+            body = response.read().decode("utf-8")
+            self.assertEqual(response.status, 404)
+            self.assertIn("找不到頁面", body)
+            self.assertIn("noindex", response.headers.get("X-Robots-Tag", ""))
+        finally:
+            server.shutdown()
+            server.server_close()
 
     def test_coffee_page_explains_free_project_and_costs(self):
         page = render_coffee_html()
@@ -1513,6 +1547,7 @@ class StatusAuthTests(unittest.TestCase):
         self.assertNotIn("/login", xml)
         self.assertNotIn("/models", xml)
         self.assertIn("https://hkbeybladex.com/product", xml)
+        self.assertIn("https://hkbeybladex.com/history", xml)
         self.assertNotIn("/go/", xml)
         self.assertNotIn("/explore", xml)
         import xml.etree.ElementTree as ET
@@ -2876,6 +2911,7 @@ class NotifyHistoryHtmlTests(unittest.TestCase):
             model="UX-08",
         )
         self.assertIn("最新通知", page)
+        self.assertIn('rel="canonical" href="https://hkbeybladex.com/history"', page)
         self.assertIn("/history?shop=hobbyland", page)
         self.assertIn("model=UX-08", page)
         self.assertIn("Hobbyland", page)
@@ -2886,6 +2922,12 @@ class NotifyHistoryHtmlTests(unittest.TestCase):
         self.assertIn(">Model</p>", page)
         self.assertNotIn("history-dates", page)
         self.assertNotIn(">Date</p>", page)
+
+    def test_history_page_is_indexable_without_filters(self):
+        page = render_history_html([])
+        self.assertIn('content="index, follow"', page)
+        self.assertNotIn("noindex", page)
+        self.assertIn('rel="canonical" href="https://hkbeybladex.com/history"', page)
 
 
 class ListingDataDirTests(unittest.TestCase):
