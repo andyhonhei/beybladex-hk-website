@@ -1140,7 +1140,7 @@ def price_drop_parts(prev_price, price):
     return format_money_amount(delta), ("%g" % pct)
 
 
-JPY_SHOP_IDS = frozenset(("biccamera", "yodobashi", "takaratomymall", "1999jp"))
+JPY_SHOP_IDS = frozenset(("biccamera", "yodobashi", "takaratomymall", "1999jp", "shimamura"))
 USD_SHOP_IDS = frozenset(("amazon-us-retail", "amazon_us_retail"))
 AMAZON_JP_RETAIL_IDS = frozenset(("amazon-jp-retail", "amazon_jp_retail"))
 _FX_HKD_FALLBACK = {"JPY": 0.052, "USD": 7.8}
@@ -3492,6 +3492,7 @@ OVERSEAS_SHOP_IDS = frozenset(
         "yodobashi",
         "takaratomymall",
         "1999jp",
+        "shimamura",
     }
 )
 
